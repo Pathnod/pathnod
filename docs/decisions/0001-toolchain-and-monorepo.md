@@ -54,7 +54,7 @@ cargo build-sbf --manifest-path programs/pathnod/Cargo.toml \
 
 ## Reproducible installation
 
-Prerequisites on Linux: `curl`, a C toolchain, `pkg-config`, OpenSSL development headers and Git. On macOS: Xcode command-line tools. Do not install secrets or create a funded wallet during DEV-01/DEV-02.
+Prerequisites on Linux: `curl`, a C toolchain, `pkg-config`, OpenSSL development headers, Git, and `nvm` installed and loaded in the current shell. On macOS: Xcode command-line tools plus `nvm` installed and loaded. The commands below assume `nvm --version` succeeds before the Node.js step. Do not install secrets or create a funded wallet during DEV-01/DEV-02.
 
 ```sh
 # Rust host toolchain
@@ -168,15 +168,23 @@ A mismatch is a failed check; do not silently continue with a newer version.
 
 ### 2. Program build — required path
 
-```sh
-anchor build
-```
-
-This must succeed and produce the program `.so` and IDL. Then run the explicit equivalent to prove the frozen compiler settings:
+When `target/deploy/pathnod-keypair.json` is absent, Anchor 1.2.0 generates an ignored local keypair and synchronizes its public ID into `programs/pathnod/src/lib.rs` and `Anchor.toml` before compilation. Verification must therefore run from a disposable archive, not from a checkout that may contain user changes:
 
 ```sh
-anchor build --tools-version v1.57 --arch v3
+(
+  set -eu
+  verify_dir="$(mktemp -d)"
+  trap 'rm -rf "$verify_dir"' EXIT HUP INT TERM
+  git archive HEAD | tar -x -C "$verify_dir"
+  cd "$verify_dir"
+  anchor build
+  anchor build --tools-version v1.57 --arch v3
+)
 ```
+
+Both builds must succeed and produce the program `.so` and IDL inside the disposable directory. The shell trap removes that directory even if a command fails or is interrupted. Never copy or commit the generated keypair, verification-only program ID, rewritten source/configuration or artifacts. The real checkout and any pre-existing user changes remain untouched.
+
+This verification behavior is separate from the shared deployment-ID lifecycle. A deployment owner must deliberately select the intended local keypair, run `anchor keys sync`, review the resulting public-ID changes, and commit those public changes only when required. The keypair itself must never be committed.
 
 ### 3. Documented fallback
 

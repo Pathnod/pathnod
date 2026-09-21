@@ -45,7 +45,9 @@ which is authoritative.
 ## Install
 
 Linux prerequisites: `curl`, a C toolchain, `pkg-config`, OpenSSL development
-headers, Git. macOS: Xcode command-line tools.
+headers, Git, and `nvm` installed and loaded in the current shell. macOS: Xcode
+command-line tools plus `nvm` installed and loaded. The commands below assume
+`nvm --version` succeeds before the Node.js step.
 
 ```sh
 # Rust host toolchain
@@ -85,16 +87,29 @@ npm --version       # 11.19.0
 
 ## Build
 
+The first `anchor build` without `target/deploy/pathnod-keypair.json` generates
+an ignored local keypair and automatically syncs its public ID into
+`programs/pathnod/src/lib.rs` and `Anchor.toml` before compiling. Run build
+verification in a disposable archive so that this verification-only key and ID
+churn cannot alter the working tree:
+
 ```sh
-anchor build
+(
+  set -eu
+  verify_dir="$(mktemp -d)"
+  trap 'rm -rf "$verify_dir"' EXIT HUP INT TERM
+  git archive HEAD | tar -x -C "$verify_dir"
+  cd "$verify_dir"
+  anchor build
+  anchor build --tools-version v1.57 --arch v3
+)
 ```
 
-This must succeed and produce the program `.so` and the IDL. Then run the
-explicit equivalent to prove the frozen compiler settings:
-
-```sh
-anchor build --tools-version v1.57 --arch v3
-```
+Both builds must succeed and produce the program `.so` and IDL inside the
+disposable directory. The shell trap removes that directory even if a command
+fails or is interrupted. Never copy or commit its generated keypair, program
+ID, source changes or artifacts; the real checkout and any pre-existing user
+changes remain untouched.
 
 ### Diagnostic fallback
 
@@ -129,14 +144,19 @@ git status --short
 
 `programs/pathnod/src/lib.rs` and `Anchor.toml` declare the same program ID. The
 deploy keypair is **not** committed, so anyone building here owns a different
-one. Before a first deploy, generate and sync it locally:
+one. This shared deployment-ID lifecycle is separate from the disposable build
+verification above. Before a first deploy, the team must choose the intended
+local deployment keypair and sync its public ID:
 
 ```sh
 anchor keys sync
 ```
 
 That rewrites `declare_id!` and `Anchor.toml` from
-`target/deploy/pathnod-keypair.json`, which stays git-ignored.
+`target/deploy/pathnod-keypair.json`, which stays git-ignored. Commit the
+reviewed public-ID changes only when the deployment lifecycle calls for them;
+never commit the keypair. Do not commit ID changes produced by an isolated
+verification build.
 
 ## Safety rules for this repository
 
