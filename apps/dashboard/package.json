@@ -1,7 +1,0 @@
-{
-  "name": "@pathnod/dashboard",
-  "version": "0.1.0",
-  "private": true,
-  "description": "Pathnod operator dashboard (placeholder; no UI implemented yet).",
-  "license": "Apache-2.0"
-}

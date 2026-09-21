@@ -26,7 +26,7 @@ Do not use floating `stable`, `latest`, caret ranges for the items above, AVM ni
 - Anchor 1.2.0 is the latest stable Anchor release as of this decision. It adds explicit platform-tools and SBPF architecture selection. Its current CLI documentation states that `anchor build` defaults to platform-tools `v1.57` and `--arch v3`.
 - Anchor 1.1 established Rust `1.89` as the `anchor-lang` MSRV. Rust `1.95.0` satisfies that floor and matches the Rust version used by platform-tools `v1.57`, reducing host/SBF lockfile and edition drift.
 - Agave `4.2.2` is the current Devnet version floor on 2026-09-21. Anchor's `v3` output requires Agave 4.0 or newer for compatible local test tooling.
-- Node 24 is LTS; `24.21.0` ships npm `11.19.0`. npm workspaces are sufficient for the three JavaScript packages, so adding pnpm/Yarn would add a second bootstrap decision without an MVP benefit.
+- Node 24 is LTS; `24.21.0` ships npm `11.19.0`. The root npm metadata pins that toolchain without inventing packages for components that are not implemented yet. Future JavaScript packages can join npm workspaces when they contain real code.
 - `groth16-solana` 0.2.0 is the current published crate and uses Solana BN254 syscalls. Its repository documents compatibility work around older SBF compilers, but there is no upstream statement proving the exact combination Anchor 1.2.0 + Agave 4.2.2 + platform-tools v1.57. Therefore the version is frozen, while actual integration remains an explicit DEV-15 spike, not an invitation to change the global toolchain.
 
 Anchor's Rust SDK dependencies are in the Solana 3.x crate family while Agave CLI 4.2.2 is validator/CLI tooling. These version numbers do not need to match. Do not add a direct `solana-program` dependency to the Anchor program unless a later task proves it is required; use Anchor 1.2's split Solana crates or re-exports to avoid duplicate-type conflicts.
@@ -110,7 +110,7 @@ wallet = "~/.config/solana/id.json"
 
 The provider is Devnet-only. The wallet path is a local convention; no keypair, seed phrase, `.env`, RPC token or generated `target/deploy/*-keypair.json` may be committed.
 
-Root `package.json` must be private, declare `"packageManager": "npm@11.19.0"`, and use npm workspaces only for:
+Root `package.json` must be private and declare `"packageManager": "npm@11.19.0"`. It must not declare workspaces until at least one real JavaScript package exists. The intended future workspace locations are:
 
 ```json
 [
@@ -120,9 +120,9 @@ Root `package.json` must be private, declare `"packageManager": "npm@11.19.0"`, 
 ]
 ```
 
-Commit `package-lock.json` once package manifests exist. Use exact versions for hackathon-critical dependencies, including `anchor-lang = "=1.2.0"`, `anchor-spl = "=1.2.0"` when first needed, `@anchor-lang/core` 1.2.0 when first needed, and `groth16-solana = "=0.2.0"` in DEV-15. Keep Cargo and npm lockfiles committed.
+Keep the root `package-lock.json` aligned with `package.json`. Add workspace entries only when package manifests contain real scripts, dependencies or implementation. Use exact versions for hackathon-critical dependencies, including `anchor-lang = "=1.2.0"`, `anchor-spl = "=1.2.0"` when first needed, `@anchor-lang/core` 1.2.0 when first needed, and `groth16-solana = "=0.2.0"` in DEV-15. Keep Cargo and npm lockfiles committed.
 
-## DEV-02 monorepo boundary
+## Monorepo boundary
 
 Create this structure and no feature implementation:
 
@@ -141,9 +141,9 @@ Conventions:
 
 - One root Git repository.
 - One root Cargo workspace with `members = ["programs/*"]`, resolver `2`, and release overflow checks enabled.
-- One root npm workspace for the dashboard, circuits tooling and verifier only. Swift and ESP-IDF projects are not npm workspaces.
+- One root npm toolchain definition. The dashboard, circuits tooling and verifier may become npm workspaces once implemented; Swift and ESP-IDF projects are not npm workspaces.
 - `programs/pathnod` is a minimal buildable Anchor program. It may expose one no-op/initialization instruction solely to prove the toolchain; no registry, verifier, escrow, nullifier or payment behavior belongs in DEV-02.
-- Non-Rust directories should contain only a short README/placeholder that states their future stack and owning roadmap task. Do not generate Xcode projects, ESP-IDF applications, Circom circuits, Next.js UI or verifier logic yet.
+- Unimplemented component directories are retained with `.gitkeep` only. Do not generate Xcode projects, ESP-IDF applications, Circom circuits, Next.js UI or verifier logic until those components are implemented.
 - Add only justified root files: `Anchor.toml`, `Cargo.toml`, `package.json`, lockfiles, `.anchorversion`, `.nvmrc`, `.node-version`, `rust-toolchain.toml`, `.gitignore`, `.editorconfig`, and concise bootstrap instructions in `README.md`.
 - Do not add Docker, databases, CI, deployment manifests, wallets, generated proofs/keys, `.zkey`, `.ptau`, build outputs or environment files in this task. Those require concrete later use cases.
 - Use `Pathnod`/`pathnod` consistently. Do not propagate the legacy product name `Sovel` from the presentation document.
@@ -205,14 +205,22 @@ The fallback is diagnostic, not an alternative definition of done:
 
 ### 4. Repository checks
 
+For the current scaffold, which has no npm workspaces or package scripts, run:
+
 ```sh
 cargo +1.95.0 fmt --all -- --check
 cargo +1.95.0 check --workspace --locked
 npm ci
-npm run build --workspaces --if-present
-npm test --workspaces --if-present
+npm ls --all
 git diff --check
 git status --short
+```
+
+Once real JavaScript packages and their build or test scripts exist, also run:
+
+```sh
+npm run build --workspaces --if-present
+npm test --workspaces --if-present
 ```
 
 Also confirm every required top-level directory exists and that Git contains no generated keypairs, `.env` files, `.so` binaries, `target/`, `node_modules/`, `.zkey`, `.ptau`, Xcode DerivedData or ESP-IDF build output.
