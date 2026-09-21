@@ -1,0 +1,22 @@
+# Rust / Anchor
+target/
+.anchor/
+test-ledger/
+
+# JavaScript
+node_modules/
+.next/
+dist/
+coverage/
+
+# Apple / Xcode
+DerivedData/
+*.xcuserdata/
+*.xcuserstate
+.DS_Store
+
+# Secrets and local configuration
+.env
+.env.*
+!.env.example
+**/id.json
