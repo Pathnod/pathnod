@@ -1,0 +1,7 @@
+{
+  "name": "@pathnod/verifier",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Pathnod off-chain verifier service (placeholder; no verification logic implemented yet).",
+  "license": "Apache-2.0"
+}

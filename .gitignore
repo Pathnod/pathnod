@@ -1,0 +1,35 @@
+# Rust / Anchor
+target/
+.anchor/
+test-ledger/
+*.so
+
+# Keys and secrets: never commit these
+*-keypair.json
+*.pem
+.env
+.env.*
+
+# Zero-knowledge artifacts
+*.zkey
+*.ptau
+*.r1cs
+*.wtns
+
+# Node
+node_modules/
+
+# iOS / Xcode
+DerivedData/
+xcuserdata/
+*.xcuserstate
+
+# ESP-IDF
+firmware/**/build/
+firmware/**/sdkconfig
+firmware/**/sdkconfig.old
+
+# Editors and OS
+.DS_Store
+.idea/
+.vscode/
