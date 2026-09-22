@@ -74,6 +74,12 @@ public struct ServiceUUID: Hashable, Sendable, CustomStringConvertible {
 
 /// The manufacturer-specific payload of one advertisement, already split into
 /// the company identifier and the bytes that follow it.
+///
+/// The only way to build one from a raw advertisement is
+/// ``ClassificationRegistry/manufacturerDataToInspect(rawAdvertisement:)``,
+/// which rejects undeclared companies and copies no more of the payload than a
+/// rule needs. There is deliberately no initializer here that takes a whole
+/// advertisement: it would be an easy way past that boundary.
 public struct ManufacturerData: Hashable, Sendable {
   public let companyIdentifier: UInt16
   public let payload: [UInt8]
@@ -81,15 +87,6 @@ public struct ManufacturerData: Hashable, Sendable {
   public init(companyIdentifier: UInt16, payload: [UInt8]) {
     self.companyIdentifier = companyIdentifier
     self.payload = payload
-  }
-
-  /// Parses the raw `CBAdvertisementDataManufacturerDataKey` bytes: a
-  /// little-endian company identifier followed by company-defined data.
-  /// Returns `nil` for anything shorter than the mandatory two bytes.
-  public init?(rawAdvertisementBytes bytes: [UInt8]) {
-    guard bytes.count >= 2 else { return nil }
-    companyIdentifier = UInt16(bytes[0]) | (UInt16(bytes[1]) << 8)
-    payload = Array(bytes.dropFirst(2))
   }
 }
 

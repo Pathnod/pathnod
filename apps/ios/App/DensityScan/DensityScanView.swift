@@ -248,6 +248,17 @@ struct DensityScanView: View {
         }
         .buttonStyle(.borderedProminent)
         .disabled(!controller.canStart && controller.hasAcknowledgedDisclosure)
+
+        if controller.canCancelPendingStart {
+          // Without this, a radio that never reports a state leaves the
+          // primary button disabled and no way back but relaunching the app.
+          Button(role: .cancel) {
+            controller.cancelPendingStart()
+          } label: {
+            Label("Cancel", systemImage: "xmark").frame(maxWidth: .infinity)
+          }
+          .buttonStyle(.bordered)
+        }
       }
 
       if controller.canStop {

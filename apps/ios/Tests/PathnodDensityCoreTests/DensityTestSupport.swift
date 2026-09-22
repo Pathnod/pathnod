@@ -44,13 +44,15 @@ final class TestDensityClock: DensityClock, @unchecked Sendable {
   }
 }
 
-/// A clock that models civil time only, and so takes ``DensityClock``'s default
-/// monotonic reading from it.
+/// A clock that models civil time only, and deliberately derives its duration
+/// reading from it.
 ///
 /// It is the worst case the accumulator has to survive: every correction of the
 /// device clock looks to it like time passing or unwinding.
 final class CivilOnlyClock: DensityClock, @unchecked Sendable {
   var now: Date
+
+  var monotonicSeconds: TimeInterval { now.timeIntervalSinceReferenceDate }
 
   init(_ start: Date = Date(timeIntervalSince1970: 1_000)) {
     now = start

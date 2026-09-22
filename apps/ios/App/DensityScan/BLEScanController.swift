@@ -97,6 +97,7 @@ final class BLEScanController: NSObject, ObservableObject {
   init(
     store: DensityExportStore = DensityExportStore(),
     advertiserLimit: Int = SessionAccumulator.defaultAdvertiserLimit,
+    clock: any DensityClock = SystemDensityClock(),
     makeCentral: @escaping CentralFactory = { delegate in
       CBCentralManager(delegate: delegate, queue: .main)
     }
@@ -118,6 +119,7 @@ final class BLEScanController: NSObject, ObservableObject {
     rulesetVersion = loaded.version
     accumulator = SessionAccumulator(
       classifier: AdvertisementClassifier(registry: loaded),
+      clock: clock,
       advertiserLimit: advertiserLimit
     )
     applicationVersion = Self.readApplicationVersion()
@@ -193,7 +195,7 @@ final class BLEScanController: NSObject, ObservableObject {
   /// the screen never shows "Scanning" over a session that is not.
   func resume() {
     guard accumulator.state == .interrupted,
-      availability.allowsScanning,
+      isRadioReadyNow,
       isSceneActive
     else { return }
     accumulator.resume()
@@ -201,6 +203,18 @@ final class BLEScanController: NSObject, ObservableObject {
     beginScanIfPossible()
     startTicking()
     refresh()
+  }
+
+  /// Drops a Start that is still waiting for its first usable radio state.
+  ///
+  /// The session clock never started, so there is nothing to stop and nothing
+  /// to count: the controller simply goes back to idle, and Start can be tapped
+  /// again. A cancelled Start is not an interruption of anything.
+  func cancelPendingStart() {
+    guard isAwaitingRadio else { return }
+    isAwaitingRadio = false
+    refresh()
+    log.notice("start_cancelled")
   }
 
   func stop() {
@@ -306,9 +320,10 @@ final class BLEScanController: NSObject, ObservableObject {
   var canStart: Bool {
     hasAcknowledgedDisclosure && isSceneActive && summary.state == .idle && !isAwaitingRadio
   }
+  var canCancelPendingStart: Bool { isAwaitingRadio }
   var canPause: Bool { summary.state == .scanning }
   var canResume: Bool {
-    summary.state == .interrupted && availability.allowsScanning && isSceneActive
+    summary.state == .interrupted && isRadioReadyNow && isSceneActive
   }
   var canStop: Bool { summary.state == .scanning || summary.state == .interrupted }
   var canExport: Bool { summary.state == .finished }
@@ -341,6 +356,16 @@ final class BLEScanController: NSObject, ObservableObject {
   }
 
   // MARK: - Scanning
+
+  /// Whether the radio can scan *now*, rather than when it last said so.
+  ///
+  /// `availability` is a record of the last delivered callback. CoreBluetooth
+  /// can change state before its main-queue callback arrives, so a published
+  /// ready state on its own would let Resume promise a scan the manager then
+  /// refuses to start. Both readings must agree.
+  private var isRadioReadyNow: Bool {
+    availability.allowsScanning && central?.currentState == .poweredOn
+  }
 
   private func beginScanIfPossible() {
     guard accumulator.state == .scanning,
@@ -506,23 +531,31 @@ extension BLEScanController: CBCentralManagerDelegate {
     }
   }
 
-  func applyRadioState(_ state: CBManagerState) {
-    switch state {
-    case .poweredOn:
-      availability = .ready
-    case .poweredOff:
-      availability = .poweredOff
-    case .unauthorized:
-      availability = .unauthorized
-    case .unsupported:
-      availability = .unsupported
-    case .resetting:
-      availability = .resetting
-    case .unknown:
-      availability = .unknown
-    @unknown default:
-      availability = .unknown
+  /// Reads one CoreBluetooth state in the app's own vocabulary.
+  ///
+  /// The raw value is mapped rather than the enum case, because a state added
+  /// by a future iOS arrives as a value this SDK has no case for. Taking the
+  /// `Int` makes that fallback reachable from a test instead of only from a
+  /// future device. Anything this build cannot name is `unknown`: an app that
+  /// cannot name a state must not claim to be scanning under it.
+  static func availability(forRawState rawValue: Int) -> RadioAvailability {
+    switch rawValue {
+    case CBManagerState.poweredOn.rawValue: return .ready
+    case CBManagerState.poweredOff.rawValue: return .poweredOff
+    case CBManagerState.unauthorized.rawValue: return .unauthorized
+    case CBManagerState.unsupported.rawValue: return .unsupported
+    case CBManagerState.resetting.rawValue: return .resetting
+    case CBManagerState.unknown.rawValue: return .unknown
+    default: return .unknown
     }
+  }
+
+  func applyRadioState(_ state: CBManagerState) {
+    applyRadioState(rawState: state.rawValue)
+  }
+
+  func applyRadioState(rawState: Int) {
+    availability = Self.availability(forRawState: rawState)
 
     log.notice("radio_state \(String(describing: self.availability), privacy: .public)")
 

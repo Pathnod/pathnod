@@ -338,9 +338,29 @@ struct DensityExportStoreTests {
   }
 }
 
+/// A clock the controller tests move by hand, so a refused Resume can be shown
+/// to credit no foreground time however long the session is then left alone.
+private final class SteppedClock: DensityClock, @unchecked Sendable {
+  private var civil = Date(timeIntervalSince1970: 1_758_499_200)
+  private var reading: TimeInterval = 10_000
+
+  var now: Date { civil }
+
+  var monotonicSeconds: TimeInterval { reading }
+
+  func advance(by seconds: TimeInterval) {
+    civil = civil.addingTimeInterval(seconds)
+    reading += seconds
+  }
+}
+
 @MainActor
 @Suite("Scan controller")
 struct BLEScanControllerTests {
+  /// A raw value no `CBManagerState` case of this SDK carries, which is what a
+  /// state added by a future iOS looks like on arrival.
+  static let unnamedRadioStateRawValue = 99
+
   private final class CentralDouble: CentralScanning {
     var currentState: CBManagerState = .unknown
     private(set) var isScanning = false
@@ -368,13 +388,15 @@ struct BLEScanControllerTests {
 
   private func makeController(
     central: CentralDouble,
-    advertiserLimit: Int = SessionAccumulator.defaultAdvertiserLimit
+    advertiserLimit: Int = SessionAccumulator.defaultAdvertiserLimit,
+    clock: any DensityClock = SystemDensityClock()
   ) -> (controller: BLEScanController, cache: TemporaryExportCache) {
     let cache = TemporaryExportCache()
     return (
       BLEScanController(
         store: cache.store,
         advertiserLimit: advertiserLimit,
+        clock: clock,
         makeCentral: { _ in central }
       ),
       cache
@@ -505,6 +527,141 @@ struct BLEScanControllerTests {
     controller.resume()
     #expect(controller.summary.state == .scanning)
     #expect(central.startCount == 2)
+  }
+
+  /// The window M1 described: CoreBluetooth has already left `poweredOn`, but
+  /// the main-queue callback carrying that news has not been delivered, so
+  /// `availability` — and the button the user is looking at — still say ready.
+  @Test(
+    "Resume is refused while the live radio has already left powered on",
+    arguments: [CBManagerState.unknown, .poweredOff])
+  func resumeRefusedWhenLiveCentralIsNotReady(_ live: CBManagerState) {
+    let central = CentralDouble()
+    let clock = SteppedClock()
+    let (controller, cache) = makeController(central: central, clock: clock)
+    defer { cache.remove() }
+
+    controller.acknowledgeDisclosure()
+    controller.start()
+    central.currentState = .poweredOn
+    controller.applyRadioState(.poweredOn)
+    clock.advance(by: 30)
+    controller.pause()
+
+    #expect(controller.summary.state == .interrupted)
+    #expect(controller.summary.foregroundScanSeconds == 30)
+
+    central.currentState = live
+    #expect(controller.availability == .ready)
+    #expect(controller.canResume == false)
+
+    controller.resume()
+    clock.advance(by: 120)
+    controller.refresh()
+
+    #expect(controller.summary.state == .interrupted)
+    #expect(controller.summary.interruptionCount == 1)
+    #expect(controller.summary.foregroundScanSeconds == 30)
+    #expect(central.startCount == 1)
+  }
+
+  @Test(
+    "a CoreBluetooth state this build cannot name is read as unknown",
+    arguments: [-1, 7, BLEScanControllerTests.unnamedRadioStateRawValue, Int.max])
+  func unnamedRawStatesAreUnknown(_ rawValue: Int) {
+    #expect(BLEScanController.availability(forRawState: rawValue) == .unknown)
+  }
+
+  @Test("each named CoreBluetooth state keeps its own availability")
+  func namedRawStatesMapToTheirAvailability() {
+    let mapped = [
+      CBManagerState.poweredOn: RadioAvailability.ready,
+      .poweredOff: .poweredOff,
+      .unauthorized: .unauthorized,
+      .unsupported: .unsupported,
+      .resetting: .resetting,
+      .unknown: .unknown,
+    ]
+
+    for (state, availability) in mapped {
+      #expect(BLEScanController.availability(forRawState: state.rawValue) == availability)
+    }
+  }
+
+  @Test("an unnamed radio state interrupts once and recovery still requires Resume")
+  func unnamedRadioStateInterruptsOnce() {
+    let central = CentralDouble()
+    let (controller, cache) = makeController(central: central)
+    defer { cache.remove() }
+
+    controller.acknowledgeDisclosure()
+    controller.start()
+    central.currentState = .poweredOn
+    controller.applyRadioState(.poweredOn)
+    #expect(controller.summary.state == .scanning)
+
+    central.currentState = .unknown
+    controller.applyRadioState(rawState: Self.unnamedRadioStateRawValue)
+    controller.applyRadioState(rawState: Self.unnamedRadioStateRawValue)
+
+    #expect(controller.availability == .unknown)
+    #expect(controller.summary.state == .interrupted)
+    #expect(controller.summary.interruptionCount == 1)
+    #expect(central.stopCount == 1)
+
+    central.currentState = .poweredOn
+    controller.applyRadioState(.poweredOn)
+    #expect(controller.summary.state == .interrupted)
+    #expect(central.startCount == 1)
+    #expect(controller.canResume)
+
+    controller.resume()
+    #expect(controller.summary.state == .scanning)
+    #expect(central.startCount == 2)
+  }
+
+  @Test("a pending Start can be cancelled and asked for again")
+  func pendingStartIsCancellable() {
+    let central = CentralDouble()
+    let (controller, cache) = makeController(central: central)
+    defer { cache.remove() }
+
+    controller.acknowledgeDisclosure()
+    controller.start()
+    controller.applyRadioState(.unknown)
+    #expect(controller.isAwaitingRadio)
+    #expect(controller.canCancelPendingStart)
+    #expect(controller.canStart == false)
+
+    controller.cancelPendingStart()
+
+    #expect(controller.isAwaitingRadio == false)
+    #expect(controller.canCancelPendingStart == false)
+    #expect(controller.summary.state == .idle)
+    #expect(controller.summary.interruptionCount == 0)
+    #expect(central.startCount == 0)
+    #expect(controller.canStart)
+
+    controller.start()
+    #expect(controller.isAwaitingRadio)
+
+    central.currentState = .poweredOn
+    controller.applyRadioState(.poweredOn)
+    #expect(controller.summary.state == .scanning)
+    #expect(controller.summary.interruptionCount == 0)
+    #expect(central.startCount == 1)
+  }
+
+  @Test("cancelling when nothing is pending changes nothing")
+  func cancellingWithoutAPendingStartIsIgnored() {
+    let (controller, cache) = makeController()
+    defer { cache.remove() }
+
+    controller.cancelPendingStart()
+
+    #expect(controller.summary.state == .idle)
+    #expect(controller.summary.interruptionCount == 0)
+    #expect(controller.canCancelPendingStart == false)
   }
 
   @Test("the truncation warning persists through pause and finish, then clears on delete")

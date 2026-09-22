@@ -54,22 +54,9 @@ struct RadioGateTests {
     #expect(accumulator.summary.interruptionCount == 1)
   }
 
-  @Test("future states mapped to unknown use the same fail-closed transition")
-  func futureUnknownFallbackIsEquivalent() {
-    let directUnknown = RadioGate.decide(
-      availability: .unknown,
-      session: .scanning,
-      isAwaitingStart: false
-    )
-    let futureStateFallback = RadioGate.decide(
-      availability: .unknown,
-      session: .scanning,
-      isAwaitingStart: false
-    )
-
-    #expect(futureStateFallback == directUnknown)
-    #expect(futureStateFallback.effect == .interrupt)
-  }
+  // A state this build of the SDK cannot name is mapped to `.unknown` by the
+  // app target, so the fallback itself is covered where the mapping lives:
+  // `BLEScanControllerTests.unnamedRadioStateInterruptsOnce`.
 
   @Test("initial unknown waits and ready begins the requested session")
   func initialUnknownThenReadyStarts() {

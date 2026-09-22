@@ -21,16 +21,11 @@ public protocol DensityClock: Sendable {
   /// contract being honoured — a reading that does move backwards contributes
   /// no time rather than a negative one — but a clock that breaks it can only
   /// under-report.
+  ///
+  /// There is deliberately no default implementation: a conformer that derived
+  /// this from ``now`` without saying so would reintroduce wall-clock durations
+  /// silently, so every conformer has to name its duration source.
   var monotonicSeconds: TimeInterval { get }
-}
-
-extension DensityClock {
-  /// For a clock that models civil time only, which is what a test double
-  /// usually is: durations follow the civil reading, and a correction is
-  /// absorbed by the accumulator's rule that a segment never contributes a
-  /// negative duration. The shipped clock below reads a real monotonic source
-  /// instead.
-  public var monotonicSeconds: TimeInterval { now.timeIntervalSinceReferenceDate }
 }
 
 /// The clock every shipped session uses.

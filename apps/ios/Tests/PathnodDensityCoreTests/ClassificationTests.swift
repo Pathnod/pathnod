@@ -43,47 +43,29 @@ struct ServiceUUIDTests {
 
 @Suite("Manufacturer signatures")
 struct ManufacturerSignatureTests {
-  @Test("parses the little-endian company identifier")
-  func parsesCompanyIdentifier() throws {
-    let data = try #require(
-      ManufacturerData(rawAdvertisementBytes: [0x4C, 0x00, 0x10, 0x20, 0x30]))
-
-    #expect(data.companyIdentifier == 0x004C)
-    #expect(data.payload == [0x10, 0x20, 0x30])
-  }
-
-  @Test(
-    "rejects payloads shorter than the mandatory company identifier",
-    arguments: [
-      [] as [UInt8],
-      [0x4C] as [UInt8],
-    ])
-  func rejectsTruncatedPayloads(_ bytes: [UInt8]) {
-    #expect(ManufacturerData(rawAdvertisementBytes: bytes) == nil)
-  }
-
   @Test("a company identifier alone never matches")
-  func companyIdentifierAloneDoesNotMatch() throws {
+  func companyIdentifierAloneDoesNotMatch() {
     let signature = ManufacturerSignature(companyIdentifier: 0x004C, dataPrefix: [0x10, 0x20])
-    let sameCompanyDifferentProduct = try #require(
-      ManufacturerData(rawAdvertisementBytes: [0x4C, 0x00, 0x99, 0x99])
+    let sameCompanyDifferentProduct = ManufacturerData(
+      companyIdentifier: 0x004C,
+      payload: [0x99, 0x99]
     )
 
     #expect(signature.matches(sameCompanyDifferentProduct) == false)
   }
 
   @Test("an empty prefix matches nothing, even for the right company")
-  func emptyPrefixMatchesNothing() throws {
+  func emptyPrefixMatchesNothing() {
     let signature = ManufacturerSignature(companyIdentifier: 0x004C, dataPrefix: [])
-    let data = try #require(ManufacturerData(rawAdvertisementBytes: [0x4C, 0x00, 0x10]))
+    let data = ManufacturerData(companyIdentifier: 0x004C, payload: [0x10])
 
     #expect(signature.matches(data) == false)
   }
 
   @Test("a payload shorter than the prefix does not match")
-  func shortPayloadDoesNotMatch() throws {
+  func shortPayloadDoesNotMatch() {
     let signature = ManufacturerSignature(companyIdentifier: 0x004C, dataPrefix: [0x10, 0x20])
-    let data = try #require(ManufacturerData(rawAdvertisementBytes: [0x4C, 0x00, 0x10]))
+    let data = ManufacturerData(companyIdentifier: 0x004C, payload: [0x10])
 
     #expect(signature.matches(data) == false)
   }
@@ -269,6 +251,18 @@ struct ClassificationRegistryTests {
     let registry = try referenceRegistry()
 
     #expect(registry.manufacturerDataToInspect(rawAdvertisement: Data([0x99, 0x00, 0x01])) == nil)
+  }
+
+  @Test(
+    "refuses a manufacturer field shorter than the mandatory company identifier",
+    arguments: [
+      Data(),
+      Data([0x4C]),
+    ])
+  func refusesTruncatedManufacturerFields(_ raw: Data) throws {
+    let registry = try referenceRegistry()
+
+    #expect(registry.manufacturerDataToInspect(rawAdvertisement: raw) == nil)
   }
 
   @Test("an empty registry inspects no manufacturer data at all")
