@@ -115,6 +115,51 @@ struct DensityExportTests {
 
     #expect(document.counts.total == document.uniqueAdvertisers)
     #expect(document.byRule.reduce(0) { $0 + $1.count } == document.counts.classifiedTotal)
+    #expect(document.foregroundScanSeconds <= document.wallClockSeconds)
+  }
+
+  @Test("the two timestamps span exactly the wall clock the file reports")
+  func timestampsSpanTheWallClock() throws {
+    let session = try finishedSession()
+    let document = try DensityExport.makeDocument(
+      from: session.accumulator.summary,
+      appVersion: "0.1.0"
+    )
+
+    let formatter = ISO8601DateFormatter()
+    formatter.formatOptions = [.withInternetDateTime]
+    formatter.timeZone = TimeZone(secondsFromGMT: 0)
+
+    let startedAt = try #require(formatter.date(from: document.startedAt))
+    let endedAt = try #require(formatter.date(from: document.endedAt))
+
+    #expect(Int(endedAt.timeIntervalSince(startedAt)) == document.wallClockSeconds)
+  }
+
+  @Test("a session that claims to have scanned for longer than it ran is refused")
+  func refusesForegroundLongerThanTheSession() throws {
+    let summary = SessionSummary(
+      sessionID: fixedSessionID(),
+      rulesetVersion: "test-1",
+      state: .finished,
+      startedAt: Date(timeIntervalSince1970: 0),
+      endedAt: Date(timeIntervalSince1970: 20),
+      wallClockSeconds: 20,
+      foregroundScanSeconds: 110,
+      interruptionCount: 1,
+      uniqueAdvertisers: 0,
+      counts: [.helium: 0, .wifi: 0, .ev: 0, .unknown: 0],
+      byRule: []
+    )
+
+    #expect(
+      throws: DensityExportError.foregroundExceedsWallClock(
+        foregroundScanSeconds: 110,
+        wallClockSeconds: 20
+      )
+    ) {
+      try DensityExport.makeDocument(from: summary, appVersion: "0.1.0")
+    }
   }
 
   @Test("rule rows are aggregate, documented and never zero")

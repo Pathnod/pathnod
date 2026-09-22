@@ -10,6 +10,7 @@ public enum DensityExportError: Error, Equatable, Sendable {
   case missingStartTimestamp
   case missingEndTimestamp
   case endedBeforeStart
+  case foregroundExceedsWallClock(foregroundScanSeconds: Int, wallClockSeconds: Int)
   case emptyApplicationVersion
   case categoryCountsDoNotReconcile(uniqueAdvertisers: Int, categoryTotal: Int)
   case ruleCountsDoNotReconcile(ruleTotal: Int, classifiedTotal: Int)
@@ -93,6 +94,14 @@ public struct DensityExportRuleRow: Codable, Hashable, Sendable {
 /// that is not declared here cannot appear in the file, and the type declares no
 /// peripheral identifier, local name, address, manufacturer payload, service
 /// data, raw advertisement, per-device row, or location field of any kind.
+///
+/// `startedAt` and `endedAt` are two points on one civil scale, read once at
+/// the start of the session; the durations beside them are measured
+/// monotonically. A reader can therefore rely on
+/// `endedAt - startedAt == wallClockSeconds` and on
+/// `foregroundScanSeconds <= wallClockSeconds` in every file, and should read
+/// the timestamps as the device's idea of when the session ran rather than as
+/// the measurement itself. ``SessionAccumulator`` documents the rule in full.
 public struct DensityExportV1: Codable, Hashable, Sendable {
   public static let currentSchemaVersion = 1
 
@@ -197,6 +206,17 @@ public enum DensityExport {
       ("uniqueAdvertisers", summary.uniqueAdvertisers),
     ] where value < 0 {
       throw DensityExportError.negativeValue(field: field)
+    }
+
+    // Scanning is a part of the session, so it cannot outlast it. The
+    // accumulator measures both durations from the same monotonic readings and
+    // cannot break this; the check is here so that a duration nobody can
+    // reconcile is refused rather than published.
+    guard summary.foregroundScanSeconds <= summary.wallClockSeconds else {
+      throw DensityExportError.foregroundExceedsWallClock(
+        foregroundScanSeconds: summary.foregroundScanSeconds,
+        wallClockSeconds: summary.wallClockSeconds
+      )
     }
 
     let counts = DensityExportCounts(summary.counts)

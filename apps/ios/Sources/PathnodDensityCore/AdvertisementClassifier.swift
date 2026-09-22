@@ -10,11 +10,20 @@ public enum ClassificationReason: String, Codable, Sendable {
   case ambiguousMatch = "ambiguous-match"
 }
 
-/// The result of classifying one advertisement.
+/// The result of classifying one advertisement, and the whole of what a
+/// session remembers about a peripheral.
+///
+/// The accumulator keeps one of these per peripheral and merges each new
+/// sighting into it, so the evidence it carries has to be enough to decide the
+/// next merge on its own: the priority that produced the verdict is therefore
+/// recorded for an ambiguity as well as for a clean match. Nothing else is
+/// retained — no advertisement, no service UUID, no manufacturer byte.
 public struct ClassificationOutcome: Hashable, Sendable {
   public let category: DensityCategory
   public let ruleID: String?
   public let confidence: ClassificationConfidence?
+  /// The priority at which the evidence was established, for an ambiguity as
+  /// much as for a match. `nil` only when nothing matched at all.
   public let priority: Int?
   public let reason: ClassificationReason
 
@@ -27,47 +36,61 @@ public struct ClassificationOutcome: Hashable, Sendable {
     reason: .noMatch
   )
 
-  /// Rules disagreed at the same priority, so the sighting stays `unknown`.
-  public static let ambiguous = ClassificationOutcome(
-    category: .unknown,
-    ruleID: nil,
-    confidence: nil,
-    priority: nil,
-    reason: .ambiguousMatch
-  )
+  /// Rules of different categories agreed on nothing at `priority`, so the
+  /// sighting stays `unknown` — but the priority of the conflict is kept, because
+  /// only stronger evidence is allowed to settle it.
+  public static func ambiguous(priority: Int) -> ClassificationOutcome {
+    ClassificationOutcome(
+      category: .unknown,
+      ruleID: nil,
+      confidence: nil,
+      priority: priority,
+      reason: .ambiguousMatch
+    )
+  }
 
-  /// Ranks evidence so a later advertisement can only ever sharpen what is
-  /// already known about a peripheral: a clean match beats an ambiguous one,
-  /// an ambiguous one beats nothing, and between two clean matches the higher
-  /// priority wins, then the higher confidence, then the lexicographically
-  /// smaller rule identifier. The final tie-break makes a session independent
-  /// of advertisement order.
-  public func supersedes(_ other: ClassificationOutcome) -> Bool {
-    guard reason.strength == other.reason.strength else {
-      return reason.strength > other.reason.strength
+  /// Combines everything a session already knows about one peripheral with one
+  /// fresh sighting of it, and returns what is known afterwards.
+  ///
+  /// The rules, in order:
+  ///
+  /// - an advertisement that matched nothing adds nothing;
+  /// - strictly higher priority replaces what came before, and is the only
+  ///   thing that can settle an ambiguity — evidence of equal or lower
+  ///   priority never does;
+  /// - strictly lower priority is discarded;
+  /// - at equal priority, two different categories are a conflict and the
+  ///   peripheral becomes ambiguous, whether the conflict arrived in one
+  ///   advertisement or in several;
+  /// - confidence, then the lexicographically smaller rule identifier, only
+  ///   ever separates rules of one and the same category.
+  ///
+  /// Merging is therefore commutative and idempotent over a peripheral's
+  /// sightings: a session reaches the same verdict however the advertisements
+  /// were grouped or ordered.
+  public func merging(_ sighting: ClassificationOutcome) -> ClassificationOutcome {
+    guard let incomingPriority = sighting.priority else { return self }
+    guard let ownPriority = priority else { return sighting }
+
+    if incomingPriority > ownPriority { return sighting }
+    if incomingPriority < ownPriority { return self }
+
+    // Equal priority from here on: neither side outranks the other, so a
+    // disagreement between them can only be reported, never resolved.
+    if reason == .ambiguousMatch { return self }
+    if sighting.reason == .ambiguousMatch { return sighting }
+    guard category == sighting.category else {
+      return .ambiguous(priority: ownPriority)
     }
-    guard reason == .matched else { return false }
-
-    let ownPriority = priority ?? Int.min
-    let otherPriority = other.priority ?? Int.min
-    if ownPriority != otherPriority { return ownPriority > otherPriority }
 
     let ownConfidence = confidence?.rank ?? -1
-    let otherConfidence = other.confidence?.rank ?? -1
-    if ownConfidence != otherConfidence { return ownConfidence > otherConfidence }
-
-    guard let ownRuleID = ruleID, let otherRuleID = other.ruleID else { return false }
-    return ownRuleID < otherRuleID
-  }
-}
-
-extension ClassificationReason {
-  fileprivate var strength: Int {
-    switch self {
-    case .noMatch: return 0
-    case .ambiguousMatch: return 1
-    case .matched: return 2
+    let incomingConfidence = sighting.confidence?.rank ?? -1
+    if incomingConfidence != ownConfidence {
+      return incomingConfidence > ownConfidence ? sighting : self
     }
+
+    guard let ownRuleID = ruleID, let incomingRuleID = sighting.ruleID else { return self }
+    return incomingRuleID < ownRuleID ? sighting : self
   }
 }
 
@@ -90,7 +113,9 @@ public struct AdvertisementClassifier: Sendable {
     guard let strongest = matches.first else { return .unmatched }
 
     let contenders = matches.filter { $0.priority == strongest.priority }
-    guard Set(contenders.map(\.category)).count == 1 else { return .ambiguous }
+    guard Set(contenders.map(\.category)).count == 1 else {
+      return .ambiguous(priority: strongest.priority)
+    }
 
     let winner = contenders.min { lhs, rhs in
       lhs.confidence.rank == rhs.confidence.rank

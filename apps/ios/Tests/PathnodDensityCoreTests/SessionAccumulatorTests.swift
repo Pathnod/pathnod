@@ -200,8 +200,8 @@ struct SessionAccumulatorTests {
     #expect(try winner([b, a]) == "a-rule")
   }
 
-  @Test("an ambiguous later advertisement does not displace a clean match")
-  func ambiguityDoesNotDisplaceAMatch() throws {
+  @Test("an ambiguous later advertisement unsettles a match of the same priority")
+  func ambiguityAtEqualPriorityUnsettlesAMatch() throws {
     let service = try serviceUUID(TestUUIDs.heliumService)
     let registry = try ClassificationRegistry(
       version: "conflict-1",
@@ -223,7 +223,13 @@ struct SessionAccumulatorTests {
 
     let peripheral = PeripheralKey(UUID())
     accumulator.recordChecked(peripheral, advertisement(services: [service]))
-    accumulator.recordChecked(
+    #expect(accumulator.summary.counts[.helium] == 1)
+
+    // The same peripheral then shows both signatures at once. Nothing
+    // outranks anything here, so the honest answer is that two categories
+    // contend for it — exactly what the single combined advertisement would
+    // have said on its own.
+    let outcome = accumulator.recordChecked(
       peripheral,
       advertisement(
         services: [service],
@@ -231,10 +237,12 @@ struct SessionAccumulatorTests {
       )
     )
 
+    #expect(outcome?.reason == .ambiguousMatch)
     let summary = accumulator.summary
     #expect(summary.uniqueAdvertisers == 1)
-    #expect(summary.counts[.helium] == 1)
-    #expect(summary.counts[.unknown] == 0)
+    #expect(summary.counts[.helium] == 0)
+    #expect(summary.counts[.unknown] == 1)
+    #expect(summary.byRule.isEmpty)
   }
 
   @Test("a conflicting advertisement on a fresh peripheral is counted as unknown")
