@@ -6,12 +6,14 @@ import Testing
 struct SessionAccumulatorTests {
   private func makeAccumulator(
     registry: ClassificationRegistry? = nil,
-    clock: TestDensityClock = TestDensityClock()
+    clock: TestDensityClock = TestDensityClock(),
+    advertiserLimit: Int = SessionAccumulator.defaultAdvertiserLimit
   ) throws -> SessionAccumulator {
     SessionAccumulator(
       classifier: AdvertisementClassifier(registry: try registry ?? referenceRegistry()),
       clock: clock,
-      makeSessionID: { fixedSessionID() }
+      makeSessionID: { fixedSessionID() },
+      advertiserLimit: advertiserLimit
     )
   }
 
@@ -61,6 +63,49 @@ struct SessionAccumulatorTests {
     #expect(summary.counts[.helium] == 1)
     #expect(summary.byRule.count == 1)
     #expect(summary.byRule.first?.count == 1)
+  }
+
+  @Test("the advertiser bound drops new identities without breaking reconciliation")
+  func advertiserBoundDropsNewIdentities() throws {
+    let accumulator = try makeAccumulator(advertiserLimit: 2)
+    accumulator.start()
+    let first = PeripheralKey(UUID())
+    let second = PeripheralKey(UUID())
+    let dropped = PeripheralKey(UUID())
+    let helium = advertisement(services: [try serviceUUID(TestUUIDs.heliumService)])
+    let ev = advertisement(services: [try serviceUUID(TestUUIDs.evService)])
+
+    #expect(accumulator.recordChecked(first, helium) != nil)
+    #expect(accumulator.recordChecked(second, ev) != nil)
+    #expect(accumulator.record(peripheral: dropped, advertisement: helium) == nil)
+    #expect(accumulator.record(peripheral: dropped, advertisement: helium) == nil)
+    #expect(accumulator.recordChecked(first, helium) != nil)
+
+    let summary = accumulator.summary
+    #expect(summary.advertiserLimit == 2)
+    #expect(summary.uniqueAdvertisers == 2)
+    #expect(summary.uncountedSightings == 2)
+    #expect(summary.reachedAdvertiserLimit)
+    #expect(summary.classifiedTotal == summary.uniqueAdvertisers)
+    #expect(summary.byRule.map(\.count).reduce(0, +) == 2)
+  }
+
+  @Test("reset clears advertiser-limit state for a new session")
+  func resetClearsAdvertiserLimitState() throws {
+    let accumulator = try makeAccumulator(advertiserLimit: 1)
+    accumulator.start()
+    accumulator.recordChecked(PeripheralKey(UUID()), advertisement())
+    #expect(
+      accumulator.record(peripheral: PeripheralKey(UUID()), advertisement: advertisement()) == nil)
+    #expect(accumulator.summary.uncountedSightings == 1)
+
+    accumulator.reset()
+    accumulator.start()
+    accumulator.recordChecked(PeripheralKey(UUID()), advertisement())
+
+    #expect(accumulator.summary.uniqueAdvertisers == 1)
+    #expect(accumulator.summary.uncountedSightings == 0)
+    #expect(accumulator.summary.reachedAdvertiserLimit == false)
   }
 
   @Test("two identifiers carrying identical advertisements count twice")

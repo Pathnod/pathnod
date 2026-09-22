@@ -105,6 +105,35 @@ struct DensityExportTests {
     #expect(document.limitations == DensityExportV1.requiredLimitations)
   }
 
+  @Test("a truncated session remains exportable and states the advertiser bound")
+  func advertiserBoundIsExportedAsALimitation() throws {
+    let clock = TestDensityClock()
+    let accumulator = SessionAccumulator(
+      classifier: AdvertisementClassifier(registry: try referenceRegistry()),
+      clock: clock,
+      makeSessionID: { fixedSessionID() },
+      advertiserLimit: 1
+    )
+    accumulator.start()
+    accumulator.recordChecked(PeripheralKey(UUID()), advertisement())
+    #expect(
+      accumulator.record(peripheral: PeripheralKey(UUID()), advertisement: advertisement()) == nil)
+    accumulator.finish()
+
+    let document = try DensityExport.makeDocument(
+      from: accumulator.summary,
+      appVersion: "0.1.0"
+    )
+
+    #expect(document.uniqueAdvertisers == 1)
+    #expect(document.counts.total == 1)
+    #expect(document.limitations.count == DensityExportV1.requiredLimitations.count + 1)
+    let limitation = try #require(document.limitations.last)
+    #expect(limitation.contains("bound of 1"))
+    #expect(limitation.contains("1 later sightings"))
+    #expect(limitation.contains("floor"))
+  }
+
   @Test("totals reconcile inside the document")
   func totalsReconcile() throws {
     let session = try finishedSession()

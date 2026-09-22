@@ -132,6 +132,8 @@ public struct SessionSummary: Hashable, Sendable {
   public let counts: [DensityCategory: Int]
   /// Sorted by rule identifier, with zero-count rows omitted.
   public let byRule: [RuleTally]
+  public let advertiserLimit: Int
+  public let uncountedSightings: Int
 
   public init(
     sessionID: UUID,
@@ -144,7 +146,9 @@ public struct SessionSummary: Hashable, Sendable {
     interruptionCount: Int,
     uniqueAdvertisers: Int,
     counts: [DensityCategory: Int],
-    byRule: [RuleTally]
+    byRule: [RuleTally],
+    advertiserLimit: Int = SessionAccumulator.defaultAdvertiserLimit,
+    uncountedSightings: Int = 0
   ) {
     self.sessionID = sessionID
     self.rulesetVersion = rulesetVersion
@@ -157,11 +161,15 @@ public struct SessionSummary: Hashable, Sendable {
     self.uniqueAdvertisers = uniqueAdvertisers
     self.counts = counts
     self.byRule = byRule
+    self.advertiserLimit = advertiserLimit
+    self.uncountedSightings = uncountedSightings
   }
 
   public var classifiedTotal: Int {
     DensityCategory.allCases.reduce(0) { $0 + (counts[$1] ?? 0) }
   }
+
+  public var reachedAdvertiserLimit: Bool { uncountedSightings > 0 }
 }
 
 /// Accumulates one session in memory.
@@ -202,9 +210,12 @@ public struct SessionSummary: Hashable, Sendable {
 /// actor, and nothing here is persisted, so an interrupted session is lost if
 /// iOS terminates the process.
 public final class SessionAccumulator {
+  public static let defaultAdvertiserLimit = 50_000
+
   private let classifier: AdvertisementClassifier
   private let clock: any DensityClock
   private let makeSessionID: () -> UUID
+  private let advertiserLimit: Int
 
   public private(set) var state: SessionState = .idle
   public private(set) var sessionID: UUID
@@ -225,15 +236,18 @@ public final class SessionAccumulator {
   private var outcomes: [PeripheralKey: ClassificationOutcome] = [:]
   private var categoryCounts: [DensityCategory: Int] = [:]
   private var ruleCounts: [String: Int] = [:]
+  private var uncountedSightings = 0
 
   public init(
     classifier: AdvertisementClassifier,
     clock: any DensityClock = SystemDensityClock(),
-    makeSessionID: @escaping () -> UUID = { UUID() }
+    makeSessionID: @escaping () -> UUID = { UUID() },
+    advertiserLimit: Int = SessionAccumulator.defaultAdvertiserLimit
   ) {
     self.classifier = classifier
     self.clock = clock
     self.makeSessionID = makeSessionID
+    self.advertiserLimit = max(0, advertiserLimit)
     self.sessionID = makeSessionID()
   }
 
@@ -301,6 +315,7 @@ public final class SessionAccumulator {
     outcomes.removeAll()
     categoryCounts.removeAll()
     ruleCounts.removeAll()
+    uncountedSightings = 0
   }
 
   /// Records one sighting.
@@ -319,6 +334,10 @@ public final class SessionAccumulator {
 
     let sighting = classifier.classify(advertisement)
     guard let existing = outcomes[peripheral] else {
+      guard outcomes.count < advertiserLimit else {
+        if uncountedSightings < Int.max { uncountedSightings += 1 }
+        return nil
+      }
       outcomes[peripheral] = sighting
       apply(sighting, delta: 1)
       return sighting
@@ -373,7 +392,9 @@ public final class SessionAccumulator {
       interruptionCount: interruptionCount,
       uniqueAdvertisers: outcomes.count,
       counts: counts,
-      byRule: tallies
+      byRule: tallies,
+      advertiserLimit: advertiserLimit,
+      uncountedSightings: uncountedSightings
     )
   }
 

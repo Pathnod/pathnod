@@ -4,6 +4,28 @@ import OSLog
 import PathnodDensityCore
 import SwiftUI
 
+protocol CentralScanning: AnyObject {
+  var currentState: CBManagerState { get }
+  var isScanning: Bool { get }
+  func startGenericScan()
+  func stopScanning()
+}
+
+extension CBCentralManager: CentralScanning {
+  var currentState: CBManagerState { state }
+
+  func startGenericScan() {
+    scanForPeripherals(
+      withServices: nil,
+      options: [CBCentralManagerScanOptionAllowDuplicatesKey: true]
+    )
+  }
+
+  func stopScanning() {
+    stopScan()
+  }
+}
+
 /// Drives one foreground density session.
 ///
 /// Everything this type does happens while the app is in the foreground. There
@@ -14,19 +36,6 @@ import SwiftUI
 /// ``PeripheralKey`` that cannot be printed, encoded or exported.
 @MainActor
 final class BLEScanController: NSObject, ObservableObject {
-  /// What the radio can do right now, as far as CoreBluetooth has told us.
-  enum RadioAvailability: Equatable {
-    /// CoreBluetooth has not reported a state yet.
-    case unknown
-    case unsupported
-    case unauthorized
-    case poweredOff
-    case resetting
-    case ready
-
-    var allowsScanning: Bool { self == .ready }
-  }
-
   /// The disclosure the user sees before the first scan, and again in the
   /// About sheet. It states the limits of the study rather than selling it.
   static let disclosure = """
@@ -75,15 +84,24 @@ final class BLEScanController: NSObject, ObservableObject {
   private let registry: ClassificationRegistry
   private let log = Logger(subsystem: "xyz.pathnod.densityscan", category: "density-scan")
 
+  typealias CentralFactory = (CBCentralManagerDelegate) -> CentralScanning
+
   /// Created on the first Start, so the system permission prompt appears when
   /// the user asks for a scan rather than when the app launches.
-  private var central: CBCentralManager?
+  private var central: CentralScanning?
+  private let makeCentral: CentralFactory
   private var ticker: Timer?
   private var exportData: Data?
   private var isSceneActive = true
 
-  init(store: DensityExportStore = DensityExportStore()) {
+  init(
+    store: DensityExportStore = DensityExportStore(),
+    makeCentral: @escaping CentralFactory = { delegate in
+      CBCentralManager(delegate: delegate, queue: .main)
+    }
+  ) {
     self.store = store
+    self.makeCentral = makeCentral
 
     var failure: String?
     var loaded: ClassificationRegistry
@@ -140,16 +158,14 @@ final class BLEScanController: NSObject, ObservableObject {
     isAwaitingRadio = true
 
     if central == nil {
-      // No restoration identifier: this manager cannot be revived in the
-      // background, by design.
-      central = CBCentralManager(delegate: self, queue: .main)
+      central = makeCentral(self)
     }
-    if let central, central.state != .unknown {
+    if let central, central.currentState != .unknown {
       // A manager that already exists may not emit another state callback just
       // because Start was tapped again. Apply its current state immediately so
       // denied, unsupported, powered-off and resetting states cannot leave the
       // UI stuck on "Starting…".
-      apply(state: central.state)
+      applyRadioState(central.currentState)
     }
   }
 
@@ -268,7 +284,7 @@ final class BLEScanController: NSObject, ObservableObject {
     switch phase {
     case .active:
       isSceneActive = true
-      if isAwaitingRadio, central?.state == .poweredOn {
+      if isAwaitingRadio, central?.currentState == .poweredOn {
         beginSession()
       }
       refresh()
@@ -301,9 +317,12 @@ final class BLEScanController: NSObject, ObservableObject {
     case .ready:
       return nil
     case .unknown:
-      return central == nil
-        ? "Bluetooth is checked when you start a session."
-        : "Waiting for Bluetooth to report its state. If iOS is asking for permission, answer it to continue."
+      if central == nil {
+        return "Bluetooth is checked when you start a session."
+      }
+      return isAwaitingRadio
+        ? "Waiting for Bluetooth to report its state. If iOS is asking for permission, answer it to continue."
+        : "Bluetooth is not reporting a usable state. Scanning is stopped until it does, then resume the session."
     case .unsupported:
       return "This device does not support Bluetooth Low Energy scanning. No session can run."
     case .unauthorized:
@@ -323,23 +342,23 @@ final class BLEScanController: NSObject, ObservableObject {
     guard accumulator.state == .scanning,
       isSceneActive,
       let central,
-      central.state == .poweredOn
+      central.currentState == .poweredOn
     else { return }
 
     // A generic scan: no service filter, because the study counts everything
     // that advertises. Duplicates are allowed so a later, stronger
     // advertisement from a peripheral already seen can sharpen its category;
     // they cost battery, which the two-hour rehearsal is there to measure.
-    central.scanForPeripherals(
-      withServices: nil,
-      options: [CBCentralManagerScanOptionAllowDuplicatesKey: true]
-    )
+    central.startGenericScan()
     log.notice("scan_started")
   }
 
   private func stopScan() {
-    guard let central, central.state == .poweredOn else { return }
-    central.stopScan()
+    // A scan may still be active while CoreBluetooth reports `.unknown` or
+    // `.resetting`. Stop the active operation instead of trusting the new
+    // availability, then move the session to its interrupted state.
+    guard let central, central.isScanning else { return }
+    central.stopScanning()
     log.notice("scan_stopped")
   }
 
@@ -432,7 +451,7 @@ final class BLEScanController: NSObject, ObservableObject {
     if !registry.inspectedCompanyIdentifiers.isEmpty,
       let raw = advertisementData[CBAdvertisementDataManufacturerDataKey] as? Data
     {
-      manufacturer = registry.manufacturerDataToInspect(rawAdvertisementBytes: [UInt8](raw))
+      manufacturer = registry.manufacturerDataToInspect(rawAdvertisement: raw)
     }
 
     return AdvertisementSnapshot(
@@ -450,7 +469,7 @@ extension BLEScanController: CBCentralManagerDelegate {
     // The manager was created with the main queue, so the callback is
     // already on the main actor.
     MainActor.assumeIsolated {
-      apply(state: central.state)
+      applyRadioState(central.state)
     }
   }
 
@@ -479,7 +498,7 @@ extension BLEScanController: CBCentralManagerDelegate {
     }
   }
 
-  private func apply(state: CBManagerState) {
+  func applyRadioState(_ state: CBManagerState) {
     switch state {
     case .poweredOn:
       availability = .ready
@@ -499,22 +518,24 @@ extension BLEScanController: CBCentralManagerDelegate {
 
     log.notice("radio_state \(String(describing: self.availability), privacy: .public)")
 
-    switch availability {
-    case .ready where isAwaitingRadio:
+    let decision = RadioGate.decide(
+      availability: availability,
+      session: accumulator.state,
+      isAwaitingStart: isAwaitingRadio
+    )
+
+    if decision.cancelsPendingStart {
+      isAwaitingRadio = false
+    }
+
+    switch decision.effect {
+    case .beginSession:
       // The user asked for a session and the radio is finally usable.
       beginSession()
-    case .ready:
-      // Recovering the radio never resumes a paused session on its own:
-      // this only restarts the scan of a session already in `scanning`.
-      beginScanIfPossible()
-    case .unknown:
-      // CoreBluetooth has not committed to anything yet; nothing to undo.
-      break
-    case .unsupported, .unauthorized, .poweredOff, .resetting:
-      // A pending Start is cancelled rather than queued: recovery requires
-      // an explicit Start or Resume.
-      isAwaitingRadio = false
+    case .interrupt:
       interrupt(reason: "radio")
+    case .hold:
+      break
     }
     refresh()
   }

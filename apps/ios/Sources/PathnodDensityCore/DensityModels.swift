@@ -313,18 +313,21 @@ public struct ClassificationRegistry: Sendable {
     rulesByID[id]
   }
 
-  /// Narrows raw manufacturer bytes to what the rules actually need.
-  ///
-  /// Returns `nil` unless some rule declares this company identifier, and
-  /// otherwise keeps only as many bytes as the longest prefix for that
-  /// company. Arbitrary manufacturer payloads never enter the process beyond
-  /// this call.
-  public func manufacturerDataToInspect(rawAdvertisementBytes bytes: [UInt8]) -> ManufacturerData? {
-    guard let parsed = ManufacturerData(rawAdvertisementBytes: bytes) else { return nil }
-    guard let length = manufacturerPrefixLengths[parsed.companyIdentifier] else { return nil }
+  /// Narrows a raw manufacturer-data field without first copying its complete
+  /// payload. The company identifier is read in place and undeclared companies
+  /// are rejected before any payload byte is copied.
+  public func manufacturerDataToInspect(rawAdvertisement data: Data) -> ManufacturerData? {
+    guard data.count >= 2 else { return nil }
+    let lowIndex = data.startIndex
+    let highIndex = data.index(after: lowIndex)
+    let company = UInt16(data[lowIndex]) | (UInt16(data[highIndex]) << 8)
+    guard let length = manufacturerPrefixLengths[company] else { return nil }
+
+    let payloadStart = data.index(after: highIndex)
+    let payloadEnd = data.index(payloadStart, offsetBy: min(length, data.count - 2))
     return ManufacturerData(
-      companyIdentifier: parsed.companyIdentifier,
-      payload: Array(parsed.payload.prefix(length))
+      companyIdentifier: company,
+      payload: [UInt8](data[payloadStart..<payloadEnd])
     )
   }
 

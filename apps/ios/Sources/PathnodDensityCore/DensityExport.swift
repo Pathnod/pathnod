@@ -16,6 +16,7 @@ public enum DensityExportError: Error, Equatable, Sendable {
   case ruleCountsDoNotReconcile(ruleTotal: Int, classifiedTotal: Int)
   case zeroCountRuleRow(ruleID: String)
   case negativeValue(field: String)
+  case advertiserLimitExceeded(uniqueAdvertisers: Int, advertiserLimit: Int)
   case encodingFailed(String)
 }
 
@@ -116,6 +117,13 @@ public struct DensityExportV1: Codable, Hashable, Sendable {
     "No location, coordinate, geohash, Wi-Fi network, device identifier, device name, address, or raw advertising payload was collected or exported.",
   ]
 
+  public static func advertiserLimitLimitation(
+    advertiserLimit: Int,
+    uncountedSightings: Int
+  ) -> String {
+    "This session reached its bound of \(advertiserLimit) retained advertiser identities. \(uncountedSightings) later sightings from identities not already retained were discarded. uniqueAdvertisers and category counts are therefore a floor, not a complete total."
+  }
+
   public let schemaVersion: Int
   public let sessionId: String
   public let scanMode: String
@@ -204,8 +212,17 @@ public enum DensityExport {
       ("foregroundScanSeconds", summary.foregroundScanSeconds),
       ("interruptionCount", summary.interruptionCount),
       ("uniqueAdvertisers", summary.uniqueAdvertisers),
+      ("advertiserLimit", summary.advertiserLimit),
+      ("uncountedSightings", summary.uncountedSightings),
     ] where value < 0 {
       throw DensityExportError.negativeValue(field: field)
+    }
+
+    guard summary.uniqueAdvertisers <= summary.advertiserLimit else {
+      throw DensityExportError.advertiserLimitExceeded(
+        uniqueAdvertisers: summary.uniqueAdvertisers,
+        advertiserLimit: summary.advertiserLimit
+      )
     }
 
     // Scanning is a part of the session, so it cannot outlast it. The
@@ -241,6 +258,16 @@ public enum DensityExport {
       )
     }
 
+    var limitations = DensityExportV1.requiredLimitations
+    if summary.reachedAdvertiserLimit {
+      limitations.append(
+        DensityExportV1.advertiserLimitLimitation(
+          advertiserLimit: summary.advertiserLimit,
+          uncountedSightings: summary.uncountedSightings
+        )
+      )
+    }
+
     return DensityExportV1(
       sessionId: summary.sessionID.uuidString,
       rulesetVersion: summary.rulesetVersion,
@@ -252,7 +279,8 @@ public enum DensityExport {
       interruptionCount: summary.interruptionCount,
       uniqueAdvertisers: summary.uniqueAdvertisers,
       counts: counts,
-      byRule: summary.byRule.map { DensityExportRuleRow($0) }
+      byRule: summary.byRule.map { DensityExportRuleRow($0) },
+      limitations: limitations
     )
   }
 

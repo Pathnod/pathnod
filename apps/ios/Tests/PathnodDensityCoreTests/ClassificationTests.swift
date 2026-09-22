@@ -255,7 +255,7 @@ struct ClassificationRegistryTests {
 
     let inspected = try #require(
       registry.manufacturerDataToInspect(
-        rawAdvertisementBytes: [0x4C, 0x00, 0x10, 0x20, 0xDE, 0xAD, 0xBE, 0xEF]
+        rawAdvertisement: Data([0x4C, 0x00, 0x10, 0x20, 0xDE, 0xAD, 0xBE, 0xEF])
       )
     )
 
@@ -268,7 +268,7 @@ struct ClassificationRegistryTests {
   func ignoresUndeclaredCompanies() throws {
     let registry = try referenceRegistry()
 
-    #expect(registry.manufacturerDataToInspect(rawAdvertisementBytes: [0x99, 0x00, 0x01]) == nil)
+    #expect(registry.manufacturerDataToInspect(rawAdvertisement: Data([0x99, 0x00, 0x01])) == nil)
   }
 
   @Test("an empty registry inspects no manufacturer data at all")
@@ -276,7 +276,7 @@ struct ClassificationRegistryTests {
     let registry = try ClassificationRegistry.empty(version: "empty-1")
 
     #expect(
-      registry.manufacturerDataToInspect(rawAdvertisementBytes: [0x4C, 0x00, 0x10, 0x20]) == nil)
+      registry.manufacturerDataToInspect(rawAdvertisement: Data([0x4C, 0x00, 0x10, 0x20])) == nil)
   }
 }
 

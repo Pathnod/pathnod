@@ -176,6 +176,22 @@ struct AdvertisementNarrowingTests {
     #expect(manufacturer.payload == [0x10, 0x20])
   }
 
+  @Test("a large manufacturer suffix never enters the narrowed snapshot")
+  func largeManufacturerSuffixIsNotCopied() throws {
+    var bytes = Data([0x4C, 0x00, 0x10, 0x20])
+    bytes.append(contentsOf: repeatElement(UInt8(0xA5), count: 64 * 1_024))
+
+    let snapshot = BLEScanController.snapshot(
+      from: [CBAdvertisementDataManufacturerDataKey: bytes],
+      registry: try registry()
+    )
+
+    let manufacturer = try #require(snapshot.manufacturerData)
+    #expect(manufacturer.companyIdentifier == 0x004C)
+    #expect(manufacturer.payload == [0x10, 0x20])
+    #expect(manufacturer.payload.count == 2)
+  }
+
   @Test("ignores manufacturer data for a company no rule declares")
   func ignoresUndeclaredCompany() throws {
     let snapshot = BLEScanController.snapshot(
@@ -325,12 +341,39 @@ struct DensityExportStoreTests {
 @MainActor
 @Suite("Scan controller")
 struct BLEScanControllerTests {
+  private final class CentralDouble: CentralScanning {
+    var currentState: CBManagerState = .unknown
+    private(set) var isScanning = false
+    private(set) var startCount = 0
+    private(set) var stopCount = 0
+
+    func startGenericScan() {
+      isScanning = true
+      startCount += 1
+    }
+
+    func stopScanning() {
+      isScanning = false
+      stopCount += 1
+    }
+  }
+
   /// Every controller clears its export cache as it is created, so each test
   /// gets a controller pointed at a directory of its own. See
   /// ``TemporaryExportCache``.
   private func makeController() -> (controller: BLEScanController, cache: TemporaryExportCache) {
     let cache = TemporaryExportCache()
     return (BLEScanController(store: cache.store), cache)
+  }
+
+  private func makeController(
+    central: CentralDouble
+  ) -> (controller: BLEScanController, cache: TemporaryExportCache) {
+    let cache = TemporaryExportCache()
+    return (
+      BLEScanController(store: cache.store, makeCentral: { _ in central }),
+      cache
+    )
   }
 
   @Test("a fresh controller is idle, undisclosed and scanning nothing")
@@ -423,6 +466,40 @@ struct BLEScanControllerTests {
 
     #expect(FileManager.default.fileExists(atPath: survivor.path))
     #expect(controller.exportFailure == nil)
+  }
+
+  @Test("unknown during scanning interrupts once and recovery requires Resume")
+  func unknownDuringScanningRequiresResume() {
+    let central = CentralDouble()
+    let (controller, cache) = makeController(central: central)
+    defer { cache.remove() }
+
+    controller.acknowledgeDisclosure()
+    controller.start()
+    #expect(controller.isAwaitingRadio)
+    #expect(controller.summary.state == .idle)
+
+    central.currentState = .poweredOn
+    controller.applyRadioState(.poweredOn)
+    #expect(controller.summary.state == .scanning)
+    #expect(central.startCount == 1)
+
+    central.currentState = .unknown
+    controller.applyRadioState(.unknown)
+    controller.applyRadioState(.unknown)
+    #expect(controller.summary.state == .interrupted)
+    #expect(controller.summary.interruptionCount == 1)
+    #expect(central.stopCount == 1)
+
+    central.currentState = .poweredOn
+    controller.applyRadioState(.poweredOn)
+    #expect(controller.summary.state == .interrupted)
+    #expect(central.startCount == 1)
+    #expect(controller.canResume)
+
+    controller.resume()
+    #expect(controller.summary.state == .scanning)
+    #expect(central.startCount == 2)
   }
 }
 
