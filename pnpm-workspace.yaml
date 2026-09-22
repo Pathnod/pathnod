@@ -1,4 +1,5 @@
-packages: []
+packages:
+  - packages/*
 
 engineStrict: true
 minimumReleaseAge: 1440
@@ -6,3 +7,9 @@ minimumReleaseAgeStrict: true
 blockExoticSubdeps: true
 strictDepBuilds: true
 trustPolicy: no-downgrade
+allowBuilds:
+  blake-hash: true
+  esbuild: true
+overrides:
+  underscore: 1.13.8
+  ws: 8.21.0

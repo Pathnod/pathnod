@@ -15,6 +15,10 @@ test-ledger/
 *.ptau
 *.r1cs
 *.wtns
+*.wasm
+*_cpp/
+*_js/
+*.sym
 
 # Node
 node_modules/
