@@ -159,10 +159,11 @@ as `E_ASSERTION` and keep these codes internal. This decision adds no endpoint.
 TypeScript, from the repository root:
 
 ```sh
-npm ci
-npm run typecheck --workspace @pathnod/verifier
-npm run build --workspace @pathnod/verifier
-npm test --workspace @pathnod/verifier
+corepack enable
+pnpm install --frozen-lockfile
+pnpm --filter @pathnod/verifier run typecheck
+pnpm --filter @pathnod/verifier run build
+pnpm --filter @pathnod/verifier run test
 ```
 
 Swift, from `apps/ios`:
