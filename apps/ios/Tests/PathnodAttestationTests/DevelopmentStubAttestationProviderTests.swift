@@ -1,24 +1,12 @@
 import Foundation
 import Testing
-@testable import PathnodAttestation
+import PathnodAttestation
 
-private struct Fixture: Decodable {
-    let schemaVersion: Int
-    let provider: String
-    let environment: String
-    let assurance: String
-    let domainSeparator: String
-    let clientDataHashByteLength: Int
-    let proofByteLength: Int
-    let vectors: [Vector]
-
-    struct Vector: Decodable {
-        let name: String
-        let purpose: AttestationPurpose
-        let clientDataHash: String
-        let envelope: AttestationEnvelope
-    }
-}
+// The suite mirrors the compiled guard rather than a runtime flag: the stub is
+// only constructible in a Debug build, so the tests that need an instance are
+// compiled out of Release and replaced by the fail-closed expectations below.
+// Only public API is exercised, so the file also compiles under
+// `swift test -c release`, where testability is not enabled.
 
 private final class RecordingLogger: AttestationWarningLogging, @unchecked Sendable {
     private(set) var events: [AttestationWarningEvent] = []
@@ -30,6 +18,19 @@ private final class RecordingLogger: AttestationWarningLogging, @unchecked Senda
 
 @Suite("Development-only attestation provider")
 struct DevelopmentStubAttestationProviderTests {
+    @Test("factory fails closed for release builds")
+    func releaseConfigurationIsForbidden() {
+        #expect(throws: AttestationProviderError.stubForbiddenInRelease) {
+            try AttestationProviderFactory.make(
+                configuredProvider: "development_stub",
+                buildConfiguration: .release,
+                logger: RecordingLogger()
+            )
+        }
+    }
+
+    #if DEBUG
+
     @Test("produces every canonical fixture vector")
     func canonicalFixtureVectors() throws {
         let fixture = try loadFixture()
@@ -112,15 +113,48 @@ struct DevelopmentStubAttestationProviderTests {
         #expect(provider is DevelopmentStubAttestationProvider)
     }
 
-    @Test("factory fails closed for release builds")
-    func releaseConfigurationIsForbidden() {
+    #else
+
+    @Test("release builds cannot construct the development stub")
+    func releaseBuildRejectsDirectConstruction() {
+        #expect(throws: AttestationProviderError.stubForbiddenInRelease) {
+            try DevelopmentStubAttestationProvider(logger: RecordingLogger())
+        }
+    }
+
+    // A Debug build configuration passed to the factory is not enough: the
+    // compiled Release guard inside the provider still refuses to build it.
+    @Test("release builds reject the stub even for a debug build configuration")
+    func releaseBuildOverridesDebugConfiguration() {
         #expect(throws: AttestationProviderError.stubForbiddenInRelease) {
             try AttestationProviderFactory.make(
                 configuredProvider: "development_stub",
-                buildConfiguration: .release,
+                buildConfiguration: .debug,
                 logger: RecordingLogger()
             )
         }
+    }
+
+    #endif
+}
+
+#if DEBUG
+
+private struct Fixture: Decodable {
+    let schemaVersion: Int
+    let provider: String
+    let environment: String
+    let assurance: String
+    let domainSeparator: String
+    let clientDataHashByteLength: Int
+    let proofByteLength: Int
+    let vectors: [Vector]
+
+    struct Vector: Decodable {
+        let name: String
+        let purpose: AttestationPurpose
+        let clientDataHash: String
+        let envelope: AttestationEnvelope
     }
 }
 
@@ -163,3 +197,5 @@ private func encodeBase64URL(_ data: Data) -> String {
         .replacingOccurrences(of: "/", with: "_")
         .replacingOccurrences(of: "=", with: "")
 }
+
+#endif
