@@ -108,6 +108,35 @@ struct SessionAccumulatorTests {
     #expect(accumulator.summary.reachedAdvertiserLimit == false)
   }
 
+  @Test("the visible advertiser-limit warning follows dropped sightings in every session state")
+  func advertiserLimitWarningPresentation() throws {
+    let accumulator = try makeAccumulator(advertiserLimit: 1)
+    accumulator.start()
+    accumulator.recordChecked(PeripheralKey(UUID()), advertisement())
+
+    #expect(AdvertiserLimitWarning(summary: accumulator.summary) == nil)
+
+    accumulator.recordChecked(PeripheralKey(UUID()), advertisement())
+    let scanningWarning = try #require(AdvertiserLimitWarning(summary: accumulator.summary))
+    let wording = scanningWarning.message.lowercased()
+    #expect(wording.contains("incomplete"))
+    #expect(wording.contains("lower bounds"))
+    #expect(wording.contains("new identities"))
+    #expect(wording.contains("being discarded"))
+    #expect(wording.contains("retained identity limit of 1"))
+    #expect(wording.contains("1 sighting"))
+    #expect(wording.contains("unique devices") == false)
+
+    accumulator.interrupt()
+    #expect(AdvertiserLimitWarning(summary: accumulator.summary) == scanningWarning)
+
+    accumulator.finish()
+    #expect(AdvertiserLimitWarning(summary: accumulator.summary) == scanningWarning)
+
+    accumulator.reset()
+    #expect(AdvertiserLimitWarning(summary: accumulator.summary) == nil)
+  }
+
   @Test("two identifiers carrying identical advertisements count twice")
   func identicalAdvertisementsFromTwoIdentifiersCountTwice() throws {
     let accumulator = try makeAccumulator()

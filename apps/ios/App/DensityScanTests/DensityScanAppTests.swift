@@ -367,11 +367,16 @@ struct BLEScanControllerTests {
   }
 
   private func makeController(
-    central: CentralDouble
+    central: CentralDouble,
+    advertiserLimit: Int = SessionAccumulator.defaultAdvertiserLimit
   ) -> (controller: BLEScanController, cache: TemporaryExportCache) {
     let cache = TemporaryExportCache()
     return (
-      BLEScanController(store: cache.store, makeCentral: { _ in central }),
+      BLEScanController(
+        store: cache.store,
+        advertiserLimit: advertiserLimit,
+        makeCentral: { _ in central }
+      ),
       cache
     )
   }
@@ -500,6 +505,32 @@ struct BLEScanControllerTests {
     controller.resume()
     #expect(controller.summary.state == .scanning)
     #expect(central.startCount == 2)
+  }
+
+  @Test("the truncation warning persists through pause and finish, then clears on delete")
+  func advertiserLimitWarningLifecycle() throws {
+    let central = CentralDouble()
+    central.currentState = .poweredOn
+    let (controller, cache) = makeController(central: central, advertiserLimit: 1)
+    defer { cache.remove() }
+
+    controller.acknowledgeDisclosure()
+    controller.start()
+    controller.record(peripheralID: UUID(), advertisementData: [:])
+    #expect(AdvertiserLimitWarning(summary: controller.summary) == nil)
+
+    controller.record(peripheralID: UUID(), advertisementData: [:])
+    controller.refresh()
+    let scanningWarning = try #require(AdvertiserLimitWarning(summary: controller.summary))
+
+    controller.pause()
+    #expect(AdvertiserLimitWarning(summary: controller.summary) == scanningWarning)
+
+    controller.stop()
+    #expect(AdvertiserLimitWarning(summary: controller.summary) == scanningWarning)
+
+    controller.discardResult()
+    #expect(AdvertiserLimitWarning(summary: controller.summary) == nil)
   }
 }
 

@@ -96,6 +96,7 @@ final class BLEScanController: NSObject, ObservableObject {
 
   init(
     store: DensityExportStore = DensityExportStore(),
+    advertiserLimit: Int = SessionAccumulator.defaultAdvertiserLimit,
     makeCentral: @escaping CentralFactory = { delegate in
       CBCentralManager(delegate: delegate, queue: .main)
     }
@@ -115,7 +116,10 @@ final class BLEScanController: NSObject, ObservableObject {
 
     registry = loaded
     rulesetVersion = loaded.version
-    accumulator = SessionAccumulator(classifier: AdvertisementClassifier(registry: loaded))
+    accumulator = SessionAccumulator(
+      classifier: AdvertisementClassifier(registry: loaded),
+      advertiserLimit: advertiserLimit
+    )
     applicationVersion = Self.readApplicationVersion()
     summary = accumulator.summary
 
@@ -371,8 +375,24 @@ final class BLEScanController: NSObject, ObservableObject {
     log.notice("session_interrupted reason=\(reason) count=\(self.summary.interruptionCount)")
   }
 
-  private func refresh() {
+  func refresh() {
     summary = accumulator.summary
+  }
+
+  /// Narrows and records one callback. Internal so deterministic app tests can
+  /// exercise the same presentation update and reset path without a BLE radio.
+  func record(peripheralID: UUID, advertisementData: [String: Any]) {
+    let key = PeripheralKey(peripheralID)
+    let snapshot = Self.snapshot(from: advertisementData, registry: registry)
+    let known = accumulator.uniqueAdvertisers
+    accumulator.record(peripheral: key, advertisement: snapshot)
+
+    // Duplicates are allowed, so in a busy street most callbacks do not change
+    // the retained total. Publish new retained identities immediately; the
+    // one-second ticker publishes reclassifications and dropped sightings.
+    if accumulator.uniqueAdvertisers != known {
+      refresh()
+    }
   }
 
   private func startTicking() {
@@ -482,19 +502,7 @@ extension BLEScanController: CBCentralManagerDelegate {
     MainActor.assumeIsolated {
       // The peripheral is not retained, not connected to, and not named:
       // only its identifier crosses this line, wrapped so it cannot leave.
-      let key = PeripheralKey(peripheral.identifier)
-      let snapshot = Self.snapshot(from: advertisementData, registry: registry)
-      let known = accumulator.uniqueAdvertisers
-      accumulator.record(peripheral: key, advertisement: snapshot)
-
-      // Duplicates are allowed, so in a busy street most callbacks are a
-      // peripheral already counted. Rebuilding and publishing the summary
-      // for each one would re-render the screen hundreds of times a second
-      // for no visible change; the one-second ticker covers the rest,
-      // including a reclassification.
-      if accumulator.uniqueAdvertisers != known {
-        refresh()
-      }
+      record(peripheralID: peripheral.identifier, advertisementData: advertisementData)
     }
   }
 

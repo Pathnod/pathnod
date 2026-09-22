@@ -25,6 +25,9 @@ struct DensityScanView: View {
           if let failure = controller.exportFailure {
             banner(failure, systemImage: "xmark.octagon")
           }
+          if let warning = AdvertiserLimitWarning(summary: controller.summary) {
+            banner(warning.message, systemImage: "exclamationmark.triangle.fill")
+          }
           timingCard
           countersCard
           ruleCard
