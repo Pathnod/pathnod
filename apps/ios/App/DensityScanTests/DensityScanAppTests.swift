@@ -94,13 +94,23 @@ struct ClassificationRulesTests {
     }
   }
 
-  @Test("the source reference states what a match does not prove")
-  func sourceReferenceStatesItsLimits() {
-    let reference = ClassificationRules.heliumConfigurationService.sourceReference.lowercased()
+  /// The three limits the rule documentation commits to, in the words the
+  /// reference actually uses. They travel into every export, so the wording is
+  /// part of what the study publishes and is compared literally.
+  @Test(
+    "the source reference states what a match does not prove",
+    arguments: [
+      "https://",
+      "advertised only while a hotspot offers configuration",
+      "can be spoofed",
+      "not evidence of network membership, activity, ownership or location",
+    ])
+  func sourceReferenceStatesItsLimits(_ expected: String) {
+    let reference = ClassificationRules.heliumConfigurationService.sourceReference
+      .lowercased()
+      .replacingOccurrences(of: "\n", with: " ")
 
-    #expect(reference.contains("https://"))
-    #expect(reference.contains("spoofable"))
-    #expect(reference.contains("not evidence of network membership"))
+    #expect(reference.contains(expected), "the source reference must state: \(expected)")
   }
 }
 
@@ -228,53 +238,105 @@ struct AdvertisementNarrowingTests {
   }
 }
 
+/// A cache directory belonging to one test and to nothing else.
+///
+/// Both a store and a controller clear their whole export subdirectory — the
+/// controller does it the moment it is created — and Swift Testing runs tests
+/// in parallel by default. Marking a suite `.serialized` would not help,
+/// because that trait orders a suite's own tests and not the suites beside it,
+/// so two tests sharing the app's real caches directory would delete each
+/// other's files. Every test that touches a store therefore works in a
+/// directory nobody else knows the name of.
+private struct TemporaryExportCache {
+  let container: URL
+  let store: DensityExportStore
+
+  init() {
+    container = FileManager.default.temporaryDirectory
+      .appendingPathComponent("DensityScanTests-\(UUID().uuidString)", isDirectory: true)
+    store = DensityExportStore(container: container)
+  }
+
+  /// Removes the whole directory, including anything a failing test left in it.
+  func remove() {
+    try? FileManager.default.removeItem(at: container)
+  }
+}
+
 @Suite("Export cache")
 struct DensityExportStoreTests {
   @Test("writing replaces any previous export and clearing removes it")
   func writeThenClear() throws {
-    let store = DensityExportStore()
-    defer { try? store.clear() }
+    let cache = TemporaryExportCache()
+    defer { cache.remove() }
 
-    let first = try store.write(Data("{}".utf8), named: "pathnod-density-first.json")
+    let first = try cache.store.write(Data("{}".utf8), named: "pathnod-density-first.json")
     #expect(FileManager.default.fileExists(atPath: first.path))
 
-    let second = try store.write(Data("{}".utf8), named: "pathnod-density-second.json")
+    let second = try cache.store.write(Data("{}".utf8), named: "pathnod-density-second.json")
     #expect(FileManager.default.fileExists(atPath: second.path))
     #expect(FileManager.default.fileExists(atPath: first.path) == false)
 
-    try store.clear()
+    try cache.store.clear()
     #expect(FileManager.default.fileExists(atPath: second.path) == false)
   }
 
   @Test("clearing an empty cache is not an error")
   func clearingEmptyCacheSucceeds() throws {
-    let store = DensityExportStore()
+    let cache = TemporaryExportCache()
+    defer { cache.remove() }
 
-    try store.clear()
-    try store.clear()
+    try cache.store.clear()
+    try cache.store.clear()
   }
 
   @Test("exports live in the caches directory, not in Documents")
   func writesToCaches() throws {
-    let store = DensityExportStore()
-    defer { try? store.clear() }
-
-    let url = try store.write(Data("{}".utf8), named: "pathnod-density-location.json")
+    // The shipped store is asked where it would write rather than made to
+    // write there: this is a claim about the path the app ships with, and the
+    // real caches directory is shared by every test in the bundle.
+    let directory = try #require(DensityExportStore().directory)
     let caches = try #require(
       FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first
     )
 
-    #expect(url.path.hasPrefix(caches.path))
-    #expect(url.path.contains("/Documents/") == false)
+    #expect(directory.path.hasPrefix(caches.path))
+    #expect(directory.path.contains("/Documents/") == false)
+    #expect(directory.lastPathComponent == "DensityExports")
+  }
+
+  @Test("a store clears its own directory and no other")
+  func storesDoNotClearEachOther() throws {
+    let cache = TemporaryExportCache()
+    defer { cache.remove() }
+    let neighbour = TemporaryExportCache()
+    defer { neighbour.remove() }
+
+    let url = try cache.store.write(Data("{}".utf8), named: "pathnod-density-scoped.json")
+    #expect(url.path.hasPrefix(cache.container.path))
+
+    _ = try neighbour.store.write(Data("{}".utf8), named: "pathnod-density-neighbour.json")
+    try neighbour.store.clear()
+
+    #expect(FileManager.default.fileExists(atPath: url.path))
   }
 }
 
 @MainActor
 @Suite("Scan controller")
 struct BLEScanControllerTests {
+  /// Every controller clears its export cache as it is created, so each test
+  /// gets a controller pointed at a directory of its own. See
+  /// ``TemporaryExportCache``.
+  private func makeController() -> (controller: BLEScanController, cache: TemporaryExportCache) {
+    let cache = TemporaryExportCache()
+    return (BLEScanController(store: cache.store), cache)
+  }
+
   @Test("a fresh controller is idle, undisclosed and scanning nothing")
   func startsIdle() {
-    let controller = BLEScanController()
+    let (controller, cache) = makeController()
+    defer { cache.remove() }
 
     #expect(controller.summary.state == .idle)
     #expect(controller.hasAcknowledgedDisclosure == false)
@@ -290,7 +352,8 @@ struct BLEScanControllerTests {
 
   @Test("the disclosure gate blocks Start until it is acknowledged")
   func disclosureGatesStart() {
-    let controller = BLEScanController()
+    let (controller, cache) = makeController()
+    defer { cache.remove() }
 
     controller.start()
     #expect(controller.summary.state == .idle)
@@ -312,7 +375,8 @@ struct BLEScanControllerTests {
 
   @Test("a lifecycle change on an idle controller counts no interruption")
   func lifecycleOnIdleIsNotAnInterruption() {
-    let controller = BLEScanController()
+    let (controller, cache) = makeController()
+    defer { cache.remove() }
 
     controller.handleScenePhase(.background)
     controller.handleScenePhase(.inactive)
@@ -324,7 +388,8 @@ struct BLEScanControllerTests {
 
   @Test("an unfinished session exports nothing")
   func exportRequiresAFinishedSession() {
-    let controller = BLEScanController()
+    let (controller, cache) = makeController()
+    defer { cache.remove() }
 
     controller.exportResult()
 
@@ -335,9 +400,29 @@ struct BLEScanControllerTests {
 
   @Test("the reported app version is never blank")
   func applicationVersionIsPresent() {
-    let controller = BLEScanController()
+    let (controller, cache) = makeController()
+    defer { cache.remove() }
 
     #expect(controller.applicationVersion.trimmingCharacters(in: .whitespaces).isEmpty == false)
+  }
+
+  @Test("a controller only ever clears the cache it was given")
+  func controllerClearsOnlyItsOwnCache() throws {
+    let neighbour = TemporaryExportCache()
+    defer { neighbour.remove() }
+    let survivor = try neighbour.store.write(
+      Data("{}".utf8),
+      named: "pathnod-density-neighbour.json"
+    )
+
+    // Creating a controller clears its cache on the spot, which is what used
+    // to reach into a directory shared with every other test.
+    let (controller, cache) = makeController()
+    defer { cache.remove() }
+    controller.discardResult()
+
+    #expect(FileManager.default.fileExists(atPath: survivor.path))
+    #expect(controller.exportFailure == nil)
   }
 }
 

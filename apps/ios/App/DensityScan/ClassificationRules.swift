@@ -40,7 +40,7 @@ enum ClassificationRules {
   /// - it is advertised only while a Hotspot is offering configuration, so a
   ///   session that counts zero of them has not shown that no Hotspot is
   ///   nearby;
-  /// - anything at all can advertise this UUID, so a match is spoofable;
+  /// - anything at all can advertise this UUID, so a match can be spoofed;
   /// - it describes a configuration window, never network membership,
   ///   activity, ownership or location.
   static let heliumConfigurationService = ClassificationRule(

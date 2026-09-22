@@ -41,15 +41,22 @@ struct DensityExportStore {
 
   private let fileManager: FileManager
 
-  init(fileManager: FileManager = .default) {
+  /// Where the subdirectory lives. The app never passes one, so it is the
+  /// caches directory; a test passes a directory of its own instead, so that
+  /// clearing one store cannot delete another's files.
+  private let container: URL?
+
+  init(fileManager: FileManager = .default, container: URL? = nil) {
     self.fileManager = fileManager
+    self.container =
+      container
+      ?? fileManager.urls(for: .cachesDirectory, in: .userDomainMask).first
   }
 
-  private var directory: URL? {
-    fileManager
-      .urls(for: .cachesDirectory, in: .userDomainMask)
-      .first?
-      .appendingPathComponent(Self.directoryName, isDirectory: true)
+  /// The one place the export path is decided, and the only thing ``clear()``
+  /// will ever remove.
+  var directory: URL? {
+    container?.appendingPathComponent(Self.directoryName, isDirectory: true)
   }
 
   /// Replaces any previous export with this one and returns its location.
