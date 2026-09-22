@@ -18,8 +18,10 @@ test-ledger/
 
 # Node
 node_modules/
+dist/
 
 # iOS / Xcode
+.build/
 DerivedData/
 xcuserdata/
 *.xcuserstate
