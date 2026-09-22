@@ -158,6 +158,17 @@ jobs:
       - name: Install pinned Rust toolchain
         run: rustup toolchain install 1.95.0 --profile minimal
 
+      - name: Install pinned Solana CLI
+        shell: bash
+        run: |
+          set -euo pipefail
+          sh -c "$(curl -sSfL https://release.anza.xyz/v4.2.2/install)"
+          solana_bin="$HOME/.local/share/solana/install/active_release/bin"
+          echo "$solana_bin" >> "$GITHUB_PATH"
+          export PATH="$solana_bin:$PATH"
+          solana --version
+          [[ "$(solana --version)" == solana-cli\ 4.2.2* ]]
+
       - name: Install AVM and Anchor
         env:
           GITHUB_TOKEN: ${{ github.token }}
