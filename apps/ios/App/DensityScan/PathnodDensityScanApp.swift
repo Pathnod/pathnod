@@ -7,15 +7,15 @@ import SwiftUI
 /// thing that keeps a scan alive is the app staying in the foreground.
 @main
 struct PathnodDensityScanApp: App {
-    @StateObject private var controller = BLEScanController()
-    @Environment(\.scenePhase) private var scenePhase
+  @StateObject private var controller = BLEScanController()
+  @Environment(\.scenePhase) private var scenePhase
 
-    var body: some Scene {
-        WindowGroup {
-            DensityScanView(controller: controller)
-        }
-        .onChange(of: scenePhase) { phase in
-            controller.handleScenePhase(phase)
-        }
+  var body: some Scene {
+    WindowGroup {
+      DensityScanView(controller: controller)
     }
+    .onChange(of: scenePhase) { phase in
+      controller.handleScenePhase(phase)
+    }
+  }
 }

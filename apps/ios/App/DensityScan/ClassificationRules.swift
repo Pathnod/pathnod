@@ -27,50 +27,50 @@ import PathnodDensityCore
 /// `sourceReference` with what was actually read, bump ``version``, and let the
 /// registry reject anything malformed.
 enum ClassificationRules {
-    /// Bumped whenever ``candidates`` changes. It is carried in every export, so
-    /// a result can be tied back to the rules that produced it.
-    static let version = "1.0.0"
+  /// Bumped whenever ``candidates`` changes. It is carried in every export, so
+  /// a result can be tied back to the rules that produced it.
+  static let version = "1.0.0"
 
-    /// The Helium Hotspot BLE configuration service.
-    ///
-    /// Helium Hotspots expose this service so the owner's phone can configure
-    /// them over BLE. Three limits come with it, and they are repeated in the
-    /// source reference because the reference travels into the export:
-    ///
-    /// - it is advertised only while a Hotspot is offering configuration, so a
-    ///   session that counts zero of them has not shown that no Hotspot is
-    ///   nearby;
-    /// - anything at all can advertise this UUID, so a match is spoofable;
-    /// - it describes a configuration window, never network membership,
-    ///   activity, ownership or location.
-    static let heliumConfigurationService = ClassificationRule(
-        id: "helium-hotspot-config-service-v1",
-        category: .helium,
-        confidence: .high,
-        sourceKind: .publishedSpec,
-        sourceReference: """
-            Official Helium client and peripheral sources at immutable revisions: \
-            https://github.com/helium/react-native-helium/blob/40caf0c70af8955a62712f742a7f2a1c2678610c/src/HotspotBle/bleTypes.ts ; \
-            https://github.com/helium/react-native-helium/blob/40caf0c70af8955a62712f742a7f2a1c2678610c/src/HotspotBle/useHotspotBle.tsx ; \
-            https://github.com/helium/gateway-config/blob/f2b93c8d09f9c39a122edc38082ef83d716c67da/src/gateway_gatt.hrl ; \
-            https://github.com/helium/gateway-config/blob/f2b93c8d09f9c39a122edc38082ef83d716c67da/src/gateway_ble_advertisement.erl . \
-            The UUID is advertised only while a Hotspot offers configuration over \
-            BLE and can be spoofed; a match is not evidence of network membership, \
-            activity, ownership or location.
-            """,
-        serviceUUIDs: Set([ServiceUUID("0fda92b2-44a2-4af2-84f5-fa682baa2b8d")].compactMap { $0 }),
-        priority: 100
-    )
+  /// The Helium Hotspot BLE configuration service.
+  ///
+  /// Helium Hotspots expose this service so the owner's phone can configure
+  /// them over BLE. Three limits come with it, and they are repeated in the
+  /// source reference because the reference travels into the export:
+  ///
+  /// - it is advertised only while a Hotspot is offering configuration, so a
+  ///   session that counts zero of them has not shown that no Hotspot is
+  ///   nearby;
+  /// - anything at all can advertise this UUID, so a match is spoofable;
+  /// - it describes a configuration window, never network membership,
+  ///   activity, ownership or location.
+  static let heliumConfigurationService = ClassificationRule(
+    id: "helium-hotspot-config-service-v1",
+    category: .helium,
+    confidence: .high,
+    sourceKind: .publishedSpec,
+    sourceReference: """
+      Official Helium client and peripheral sources at immutable revisions: \
+      https://github.com/helium/react-native-helium/blob/40caf0c70af8955a62712f742a7f2a1c2678610c/src/HotspotBle/bleTypes.ts ; \
+      https://github.com/helium/react-native-helium/blob/40caf0c70af8955a62712f742a7f2a1c2678610c/src/HotspotBle/useHotspotBle.tsx ; \
+      https://github.com/helium/gateway-config/blob/f2b93c8d09f9c39a122edc38082ef83d716c67da/src/gateway_gatt.hrl ; \
+      https://github.com/helium/gateway-config/blob/f2b93c8d09f9c39a122edc38082ef83d716c67da/src/gateway_ble_advertisement.erl . \
+      The UUID is advertised only while a Hotspot offers configuration over \
+      BLE and can be spoofed; a match is not evidence of network membership, \
+      activity, ownership or location.
+      """,
+    serviceUUIDs: Set([ServiceUUID("0fda92b2-44a2-4af2-84f5-fa682baa2b8d")].compactMap { $0 }),
+    priority: 100
+  )
 
-    /// The documented signatures. One entry, by review; see the type
-    /// documentation for what was rejected and why.
-    static let candidates: [ClassificationRule] = [heliumConfigurationService]
+  /// The documented signatures. One entry, by review; see the type
+  /// documentation for what was rejected and why.
+  static let candidates: [ClassificationRule] = [heliumConfigurationService]
 
-    /// Builds the registry, letting it validate the whole set.
-    ///
-    /// Throws ``ClassificationRegistryError`` rather than dropping a bad rule, so
-    /// a mistake is visible instead of silently narrowing the ruleset.
-    static func makeRegistry() throws -> ClassificationRegistry {
-        try ClassificationRegistry(version: version, rules: candidates)
-    }
+  /// Builds the registry, letting it validate the whole set.
+  ///
+  /// Throws ``ClassificationRegistryError`` rather than dropping a bad rule, so
+  /// a mistake is visible instead of silently narrowing the ruleset.
+  static func makeRegistry() throws -> ClassificationRegistry {
+    try ClassificationRegistry(version: version, rules: candidates)
+  }
 }
