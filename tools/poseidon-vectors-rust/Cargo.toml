@@ -1,0 +1,15 @@
+[package]
+name = "pathnod-poseidon-vectors"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+description = "Host-only verification of Pathnod's canonical Poseidon vectors"
+publish = false
+
+[dependencies]
+ark-bn254 = "=0.5.0"
+ark-ff = "=0.5.0"
+light-poseidon = "=0.4.0"
+num-bigint = "=0.4.6"
+serde = { version = "=1.0.228", features = ["derive"] }
+serde_json = "=1.0.145"
