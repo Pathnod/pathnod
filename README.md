@@ -59,11 +59,12 @@ running system yet.
 
 ## Getting started
 
-The repository pins Rust, Solana/Agave, Anchor, Node.js, and npm versions. Use
+The repository pins Rust, Solana/Agave, Anchor, Node.js, and pnpm versions. Use
 the exact versions declared by the root configuration files.
 
 ```sh
-npm ci
+corepack enable
+pnpm install --frozen-lockfile
 ```
 
 For installation, version checks, isolated Anchor builds, and the local program

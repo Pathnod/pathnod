@@ -16,7 +16,7 @@ Use the following exact versions:
 | SBF platform-tools | `v1.57` | explicit verification/fallback flags; also Anchor 1.2.0 default |
 | SBF architecture | `v3` | explicit verification/fallback flags; also Anchor 1.2.0 default |
 | Node.js | `24.21.0` LTS | `.nvmrc` and `.node-version` |
-| npm | `11.19.0` | root `package.json` → `packageManager`; commit `package-lock.json` |
+| pnpm | `11.27.1` | root `package.json` → `packageManager`; commit `pnpm-lock.yaml` |
 | Future Groth16 verifier crate | `groth16-solana = "=0.2.0"` | add only in DEV-15, with the compatibility spike below |
 
 Do not use floating `stable`, `latest`, caret ranges for the items above, AVM nightly mode, Agave beta/RC releases, or Node 26 Current during the hackathon.
@@ -26,7 +26,7 @@ Do not use floating `stable`, `latest`, caret ranges for the items above, AVM ni
 - Anchor 1.2.0 is the latest stable Anchor release as of this decision. It adds explicit platform-tools and SBPF architecture selection. Its current CLI documentation states that `anchor build` defaults to platform-tools `v1.57` and `--arch v3`.
 - Anchor 1.1 established Rust `1.89` as the `anchor-lang` MSRV. Rust `1.95.0` satisfies that floor and matches the Rust version used by platform-tools `v1.57`, reducing host/SBF lockfile and edition drift.
 - Agave `4.2.2` is the current Devnet version floor on 2026-09-21. Anchor's `v3` output requires Agave 4.0 or newer for compatible local test tooling.
-- Node 24 is LTS; `24.21.0` ships npm `11.19.0`. The root npm metadata pins that toolchain without inventing packages for components that are not implemented yet. Future JavaScript packages can join npm workspaces when they contain real code.
+- Node 24 is LTS. Corepack activates the exact pnpm `11.27.1` version declared by the repository. pnpm's strict dependency-build controls and minimum release age reduce JavaScript supply-chain exposure without inventing packages for components that are not implemented yet. Future JavaScript packages can join the pnpm workspace when they contain real code.
 - `groth16-solana` 0.2.0 is the current published crate and uses Solana BN254 syscalls. Its repository documents compatibility work around older SBF compilers, but there is no upstream statement proving the exact combination Anchor 1.2.0 + Agave 4.2.2 + platform-tools v1.57. Therefore the version is frozen, while actual integration remains an explicit DEV-15 spike, not an invitation to change the global toolchain.
 
 Anchor's Rust SDK dependencies are in the Solana 3.x crate family while Agave CLI 4.2.2 is validator/CLI tooling. These version numbers do not need to match. Do not add a direct `solana-program` dependency to the Anchor program unless a later task proves it is required; use Anchor 1.2's split Solana crates or re-exports to avoid duplicate-type conflicts.
@@ -71,10 +71,11 @@ avm nightly --disable || true
 avm install 1.2.0
 avm use 1.2.0
 
-# Node/npm with nvm; repository files will select the same Node version later
+# Node/pnpm with nvm and Corepack; repository files select the exact versions
 nvm install 24.21.0
 nvm use 24.21.0
-npm install --global npm@11.19.0
+corepack enable
+pnpm --version
 ```
 
 The implementation must add these pins:
@@ -110,7 +111,7 @@ wallet = "~/.config/solana/id.json"
 
 The provider is Devnet-only. The wallet path is a local convention; no keypair, seed phrase, `.env`, RPC token or generated `target/deploy/*-keypair.json` may be committed.
 
-Root `package.json` must be private and declare `"packageManager": "npm@11.19.0"`. It must not declare workspaces until at least one real JavaScript package exists. The intended future workspace locations are:
+Root `package.json` must be private and pin pnpm `11.27.1` with its Corepack integrity hash. `pnpm-workspace.yaml` holds the dependency security policy but must keep `packages: []` until at least one real JavaScript package exists. The intended future workspace locations are:
 
 ```json
 [
@@ -120,7 +121,7 @@ Root `package.json` must be private and declare `"packageManager": "npm@11.19.0"
 ]
 ```
 
-Keep the root `package-lock.json` aligned with `package.json`. Add workspace entries only when package manifests contain real scripts, dependencies or implementation. Use exact versions for hackathon-critical dependencies, including `anchor-lang = "=1.2.0"`, `anchor-spl = "=1.2.0"` when first needed, `@anchor-lang/core` 1.2.0 when first needed, and `groth16-solana = "=0.2.0"` in DEV-15. Keep Cargo and npm lockfiles committed.
+Keep the root `pnpm-lock.yaml` aligned with `package.json` and `pnpm-workspace.yaml`. The pnpm policy requires a 24-hour minimum release age, rejects metadata downgrades and exotic transitive sources, and fails on unapproved dependency build scripts. Add workspace entries only when package manifests contain real scripts, dependencies or implementation. Use exact versions for hackathon-critical dependencies, including `anchor-lang = "=1.2.0"`, `anchor-spl = "=1.2.0"` when first needed, `@anchor-lang/core` 1.2.0 when first needed, and `groth16-solana = "=0.2.0"` in DEV-15. Keep Cargo and pnpm lockfiles committed.
 
 ## Monorepo boundary
 
@@ -141,7 +142,7 @@ Conventions:
 
 - One root Git repository.
 - One root Cargo workspace with `members = ["programs/*"]`, resolver `2`, and release overflow checks enabled.
-- One root npm toolchain definition. The dashboard, circuits tooling and verifier may become npm workspaces once implemented; Swift and ESP-IDF projects are not npm workspaces.
+- One root pnpm toolchain definition. The dashboard, circuits tooling and verifier may become pnpm workspace packages once implemented; Swift and ESP-IDF projects are not pnpm workspace packages.
 - `programs/pathnod` is a minimal buildable Anchor program. It may expose one no-op/initialization instruction solely to prove the toolchain; no registry, verifier, escrow, nullifier or payment behavior belongs in DEV-02.
 - Unimplemented component directories are retained with `.gitkeep` only. Do not generate Xcode projects, ESP-IDF applications, Circom circuits, Next.js UI or verifier logic until those components are implemented.
 - Add only justified root files: `Anchor.toml`, `Cargo.toml`, `package.json`, lockfiles, `.anchorversion`, `.nvmrc`, `.node-version`, `rust-toolchain.toml`, `.gitignore`, `.editorconfig`, and concise bootstrap instructions in `README.md`.
@@ -161,7 +162,7 @@ solana --version                # solana-cli 4.2.2 (... Agave)
 avm list                        # 1.2.0 installed and selected
 anchor --version                # anchor-cli 1.2.0
 node --version                  # v24.21.0
-npm --version                   # 11.19.0
+pnpm --version                  # 11.27.1
 ```
 
 A mismatch is a failed check; do not silently continue with a newer version.
@@ -205,13 +206,13 @@ The fallback is diagnostic, not an alternative definition of done:
 
 ### 4. Repository checks
 
-For the current scaffold, which has no npm workspaces or package scripts, run:
+For the current scaffold, which has no pnpm workspace packages or package scripts, run:
 
 ```sh
 cargo +1.95.0 fmt --all -- --check
 cargo +1.95.0 check --workspace --locked
-npm ci
-npm ls --all
+pnpm install --frozen-lockfile
+pnpm list --depth Infinity
 git diff --check
 git status --short
 ```
@@ -219,8 +220,8 @@ git status --short
 Once real JavaScript packages and their build or test scripts exist, also run:
 
 ```sh
-npm run build --workspaces --if-present
-npm test --workspaces --if-present
+pnpm --recursive --if-present run build
+pnpm --recursive --if-present run test
 ```
 
 Also confirm every required top-level directory exists and that Git contains no generated keypairs, `.env` files, `.so` binaries, `target/`, `node_modules/`, `.zkey`, `.ptau`, Xcode DerivedData or ESP-IDF build output.
@@ -255,7 +256,8 @@ Official/current sources:
 - Agave cluster version floor: https://github.com/anza-xyz/agave/wiki/feature-gate-tracker-schedule
 - Platform-tools v1.57 compiler source: https://github.com/anza-xyz/platform-tools/blob/v1.57/build.sh
 - Rust 1.95.0 release: https://blog.rust-lang.org/2026/04/16/Rust-1.95.0/
-- Node 24 LTS archive (`24.21.0`, npm `11.19.0`): https://nodejs.org/en/download/archive/v24
+- Node 24 LTS archive (`24.21.0`): https://nodejs.org/en/download/archive/v24
+- pnpm installation and Corepack: https://pnpm.io/installation
 - `groth16-solana` 0.2.0 manifest and compiler notes: https://github.com/Lightprotocol/groth16-solana/blob/v0.2.0/Cargo.toml
 - `groth16-solana` 0.2.0 API/example: https://docs.rs/groth16-solana/0.2.0/groth16_solana/groth16/index.html
 
@@ -272,6 +274,6 @@ Project inputs:
 - [ ] Add all pin/config files exactly as specified.
 - [ ] Scaffold only the agreed directories and minimal Anchor program.
 - [ ] Update README with installation, version checks, Devnet-only warning and build commands.
-- [ ] Generate and commit Cargo/npm lockfiles; exclude all build artifacts and secrets.
+- [ ] Generate and commit Cargo/pnpm lockfiles; exclude all build artifacts and secrets.
 - [ ] Run every applicable verification command above and retain real output in the DEV-01/DEV-02 handoff.
 - [ ] Do not upgrade versions during the hackathon; use a new ADR for any evidence-driven exception.

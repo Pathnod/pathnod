@@ -1,0 +1,204 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_INCREMENTAL: "0"
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: "1"
+
+jobs:
+  repository-policy:
+    name: Repository policy
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Check whitespace
+        run: git diff --check
+
+      - name: Check required monorepo directories
+        shell: bash
+        run: |
+          set -euo pipefail
+          for directory in \
+            apps/ios \
+            apps/dashboard \
+            firmware/esp32 \
+            tools/device-sim \
+            packages/circuits \
+            packages/verifier \
+            programs/pathnod \
+            docs
+          do
+            test -d "$directory" || {
+              echo "Missing required directory: $directory"
+              exit 1
+            }
+          done
+
+      - name: Reject tracked secrets and generated artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git ls-files \
+            | grep -E '(^|/)(target|node_modules|test-ledger)/|(^|/)\.env($|\.)|(^|/)(id|.*-keypair)\.json$|\.(pem|so|zkey|ptau|r1cs|wtns)$' \
+            | grep -vE '(^|/)\.env\.example$'
+          then
+            echo "Tracked secret or generated artifact detected."
+            exit 1
+          fi
+
+  rust:
+    name: Rust quality and security
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install pinned Rust toolchain
+        run: rustup toolchain install 1.95.0 --profile minimal --component rustfmt,clippy
+
+      - name: Verify Rust version
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustc --version
+          cargo --version
+          [[ "$(rustc --version)" == rustc\ 1.95.0* ]]
+          [[ "$(cargo --version)" == cargo\ 1.95.0* ]]
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Run Clippy
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings -A unexpected-cfgs
+
+      - name: Check workspace
+        run: cargo check --workspace --all-targets --locked
+
+      - name: Run Rust tests
+        run: cargo test --workspace --locked
+
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --version 0.22.2 --locked
+
+      - name: Audit Rust dependencies
+        run: cargo audit
+
+  node:
+    name: Node dependency integrity
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install pinned Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
+
+      - name: Enable pinned pnpm
+        run: |
+          corepack enable
+          pnpm --version
+
+      - name: Verify Node.js and pnpm versions
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --version
+          pnpm --version
+          test "$(node --version)" = "v24.21.0"
+          test "$(pnpm --version)" = "11.27.1"
+
+      - name: Install locked dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Audit JavaScript dependencies
+        run: pnpm audit --audit-level=high
+
+      - name: Validate dependency tree
+        run: pnpm list --depth Infinity
+
+      - name: Run available pnpm checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm run --if-present build
+          pnpm run --if-present test
+
+      - name: Ensure pnpm install is reproducible
+        run: git diff --exit-code -- package.json pnpm-lock.yaml pnpm-workspace.yaml
+
+  anchor:
+    name: Anchor SBF build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install pinned Rust toolchain
+        run: rustup toolchain install 1.95.0 --profile minimal
+
+      - name: Install pinned Solana CLI
+        shell: bash
+        run: |
+          set -euo pipefail
+          sh -c "$(curl -sSfL https://release.anza.xyz/v4.2.2/install)"
+          solana_bin="$HOME/.local/share/solana/install/active_release/bin"
+          echo "$solana_bin" >> "$GITHUB_PATH"
+          export PATH="$solana_bin:$PATH"
+          solana --version
+          [[ "$(solana --version)" == solana-cli\ 4.2.2* ]]
+
+      - name: Install AVM and Anchor
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          # Commit for the signed Anchor v1.2.0 tag.
+          cargo install --git https://github.com/otter-sec/anchor --rev 84a63f9f7112b23581816436fbcf3f6c515779f9 avm --locked --force
+          avm nightly --disable || true
+          avm install 1.2.0
+          avm use 1.2.0
+
+      - name: Verify Anchor version
+        shell: bash
+        run: |
+          set -euo pipefail
+          anchor --version
+          test "$(anchor --version)" = "anchor-cli 1.2.0"
+
+      - name: Build program in an isolated copy
+        shell: bash
+        run: |
+          set -euo pipefail
+          verify_dir="$RUNNER_TEMP/pathnod-anchor-build"
+          mkdir -p "$verify_dir"
+          git archive HEAD | tar -x -C "$verify_dir"
+          cd "$verify_dir"
+          anchor build --tools-version v1.57 --arch v3
+          test -s target/deploy/pathnod.so
+          test -s target/idl/pathnod.json
+          solana --version
+          [[ "$(solana --version)" == solana-cli\ 4.2.2* ]]
+
+      - name: Ensure the checkout remains unchanged
+        run: git diff --exit-code

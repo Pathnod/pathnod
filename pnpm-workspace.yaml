@@ -1,0 +1,9 @@
+packages:
+  - packages/verifier
+
+engineStrict: true
+minimumReleaseAge: 1440
+minimumReleaseAgeStrict: true
+blockExoticSubdeps: true
+strictDepBuilds: true
+trustPolicy: no-downgrade

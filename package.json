@@ -4,17 +4,14 @@
   "private": true,
   "description": "Pathnod monorepo: privacy-preserving observations of physical infrastructure, built on Solana.",
   "license": "Apache-2.0",
-  "packageManager": "npm@11.19.0",
-  "workspaces": [
-    "packages/verifier"
-  ],
+  "packageManager": "pnpm@11.27.1+sha512.a81d4c21b9b09a4b0aebf90ef5e527d4262bdda322d26082978cb549023ac6d9cafc98b19fffaa5c71db438a65f70224edb78d7311187861ff96480d1cdca23c",
   "engines": {
     "node": "24.21.0",
-    "npm": "11.19.0"
+    "pnpm": "11.27.1"
   },
   "scripts": {
-    "build": "npm run build --workspaces --if-present",
-    "test": "npm test --workspaces --if-present",
-    "typecheck": "npm run typecheck --workspaces --if-present"
+    "build": "pnpm --recursive --if-present run build",
+    "test": "pnpm --recursive --if-present run test",
+    "typecheck": "pnpm --recursive --if-present run typecheck"
   }
 }
