@@ -27,7 +27,7 @@ relays, and dishonest operators remain part of the threat model.
 ## Repository map
 
 ```text
-apps/ios/            iOS observer app
+apps/ios/            Swift attestation package for the future iOS observer app
 apps/dashboard/      operator dashboard
 firmware/esp32/      BLE device firmware
 tools/device-sim/    device simulator
@@ -42,8 +42,16 @@ docs/                architecture decisions and project notes
 Pathnod is at an early scaffold stage. The intended protocol above is not a
 running system yet.
 
-- The iOS app, dashboard, firmware, simulator, circuits, and verifier are
-  placeholders.
+- `packages/verifier` implements the development-only attestation verifier:
+  envelope parsing, strict unpadded base64url decoding, and a constant-time
+  proof comparison. It has no HTTP endpoint, storage, or real provider.
+- `apps/ios` is a Swift package holding the attestation provider contract and
+  its development-only stub. It is not an iOS application: there is no Xcode
+  project, UI, BLE code, or App Attest integration.
+- Both sides only implement the development stub, which carries no hardware
+  assurance. See
+  [ADR 0002](docs/decisions/0002-development-attestation.md).
+- The dashboard, firmware, simulator, and circuits are placeholders.
 - `programs/pathnod` is a minimal buildable Anchor scaffold with no registry,
   proof verification, nullifier, reward, or payment logic.
 - The repository currently establishes component boundaries and a reproducible
@@ -70,6 +78,7 @@ artifacts, or build output.
 ## Documentation
 
 - [Toolchain and monorepo baseline](docs/decisions/0001-toolchain-and-monorepo.md)
+- [Development-only attestation stubs](docs/decisions/0002-development-attestation.md)
 
 ## Contributing
 
