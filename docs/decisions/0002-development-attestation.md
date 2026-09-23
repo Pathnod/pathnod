@@ -184,15 +184,18 @@ is not enabled in a Release build.
 
 Honest limits of the current state:
 
-- The Swift package has not been compiled or executed. The review host is Linux
-  with no Swift toolchain, no macOS, no Xcode, no simulator, and no physical
-  iPhone. The Swift side is reviewed source, not verified output.
+- This Linux review host still has no Swift toolchain, macOS, Xcode,
+  simulator, or physical iPhone, so it did not run the Swift package locally.
+- DIGIX666 reported running the package on macOS in the
+  [PR review](https://github.com/Pathnod/pathnod/pull/6#pullrequestreview-5284620122):
+  5 tests passed in Debug and 3 tests passed in Release. This is external
+  reviewer-reported package-level evidence, not execution from this Linux host.
 - `CryptoKit` and the `.iOS(.v16)`/`.macOS(.v13)` platforms in `Package.swift`
   mean the package builds on Apple platforms only; an open-source Swift
   toolchain on Linux would not build it as written.
-- Only the TypeScript side is verified on Linux, via the commands above.
-- There is no iOS application, Xcode project, entitlement, or App Attest call
-  anywhere in the repository.
+- The TypeScript side is verified on Linux via the commands above.
+- There is still no iOS application or Xcode project, and no simulator or
+  physical-iPhone execution, entitlement validation, or real App Attest call.
 - The Swift and TypeScript implementations agree because both are checked
   against the committed fixture, not because either has been run against the
   other.
