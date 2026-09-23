@@ -287,6 +287,30 @@ describe("ambient production guard", () => {
     });
   });
 
+  it("does not read a supplied source before rejecting the ambient production runtime", () => {
+    withOwnProcessEnvironmentVariables({ [NODE_ENVIRONMENT_VARIABLE]: PRODUCTION_NODE_ENVIRONMENT }, () => {
+      let sourceWasRead = false;
+      const environmentSource = Object.defineProperties({}, {
+        [ATTESTATION_PROVIDER_ENVIRONMENT_VARIABLE]: {
+          enumerable: true,
+          get: () => {
+            sourceWasRead = true;
+            process.env[NODE_ENVIRONMENT_VARIABLE] = "test";
+            return DEVELOPMENT_STUB_PROVIDER;
+          },
+        },
+        [NODE_ENVIRONMENT_VARIABLE]: {
+          enumerable: true,
+          value: "test",
+        },
+      }) as EnvironmentSource;
+
+      assertConfigurationFails("E_STUB_FORBIDDEN_ENVIRONMENT", environmentSource);
+      assert.equal(sourceWasRead, false);
+      assert.equal(process.env[NODE_ENVIRONMENT_VARIABLE], PRODUCTION_NODE_ENVIRONMENT);
+    });
+  });
+
   it("revokes an already constructed verifier once the process turns to production", () => {
     const { logger, events } = createRecordingLogger();
     const verifier = new DevelopmentStubAttestationVerifier({ environmentSource: injectedSource("test"), logger });

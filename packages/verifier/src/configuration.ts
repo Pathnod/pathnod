@@ -53,6 +53,13 @@ export function isAmbientProductionRuntime(): boolean {
  * be more permissive than the configuration that built it.
  */
 export function evaluateDevelopmentStubEnablement(source: EnvironmentSource): DevelopmentStubEnablement {
+  // Check before touching the injected source. Besides making the runtime guard
+  // independent, this prevents a getter or Proxy supplied as the source from
+  // weakening an already-production process as a side effect of being read.
+  if (isAmbientProductionRuntime()) {
+    return { enabled: false, reason: "forbidden_environment" };
+  }
+
   const configured = readOwnEnvironmentValue(source, ATTESTATION_PROVIDER_ENVIRONMENT_VARIABLE);
 
   if (configured === undefined || configured === "") {
@@ -65,8 +72,8 @@ export function evaluateDevelopmentStubEnablement(source: EnvironmentSource): De
   if (!(DEVELOPMENT_STUB_ALLOWED_NODE_ENVIRONMENTS as readonly (string | undefined)[]).includes(nodeEnvironment)) {
     return { enabled: false, reason: "forbidden_environment" };
   }
-  // Independent of what the source claims: a production process never runs the
-  // stub, so an injected development or test environment cannot unlock it.
+  // Check again after reading the injected source so a side effect cannot move
+  // the process into production and still permit one verification.
   if (isAmbientProductionRuntime()) {
     return { enabled: false, reason: "forbidden_environment" };
   }
