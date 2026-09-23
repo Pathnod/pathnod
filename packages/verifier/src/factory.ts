@@ -42,9 +42,10 @@ function configurationErrorFor(reason: DevelopmentStubRejectionReason): Attestat
  *
  * There is no default and no fallback: an unset, unknown or production
  * configuration throws here, at startup, rather than downgrading a request path
- * to the stub later on. A future real provider must be selected by its own
- * identifier and, when it fails, propagate that failure instead of returning
- * the stub.
+ * to the stub later on. `environmentSource` only ever narrows what is allowed:
+ * a production process is refused whatever it holds. A future real provider
+ * must be selected by its own identifier and, when it fails, propagate that
+ * failure instead of returning the stub.
  */
 export function createAttestationVerifier(options: CreateAttestationVerifierOptions = {}): AttestationVerifier {
   const environmentSource = options.environmentSource ?? process.env;

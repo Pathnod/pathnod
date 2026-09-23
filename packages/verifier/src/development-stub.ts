@@ -1,7 +1,7 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 
 import { decodeBase64UrlStrict } from "./base64url.ts";
-import { evaluateDevelopmentStubEnablement } from "./configuration.ts";
+import { evaluateDevelopmentStubEnablement, isAmbientProductionRuntime } from "./configuration.ts";
 import {
   ATTESTATION_SCHEMA_VERSION,
   CLIENT_DATA_HASH_BYTE_LENGTH,
@@ -13,7 +13,7 @@ import {
   isAttestationPurpose,
 } from "./contract.ts";
 import type { AttestationEnvelope, AttestationPurpose, AttestationVerificationResult, EnvironmentSource } from "./contract.ts";
-import { AttestationVerificationError } from "./errors.ts";
+import { AttestationConfigurationError, AttestationVerificationError } from "./errors.ts";
 import { consoleAttestationWarningLogger, developmentStubAcceptedWarning } from "./logging.ts";
 import type { AttestationWarningLogger } from "./logging.ts";
 import type { AttestationVerificationInput, AttestationVerifier } from "./verifier.ts";
@@ -97,13 +97,23 @@ export interface DevelopmentStubAttestationVerifierOptions {
  * It carries no hardware assurance and exists so the iOS app and the server can
  * agree on the attestation boundary before real App Attest work lands. The
  * opt-in is re-read on every verification, so revoking the configuration
- * disables an already constructed verifier instead of leaving it armed.
+ * disables an already constructed verifier instead of leaving it armed. The
+ * same holds for the production state of the process itself, which is checked
+ * here as well as in the factory: constructing this class directly must not be
+ * a way around the guard.
  */
 export class DevelopmentStubAttestationVerifier implements AttestationVerifier {
   readonly #environmentSource: EnvironmentSource;
   readonly #logger: AttestationWarningLogger;
 
   constructor(options: DevelopmentStubAttestationVerifierOptions = {}) {
+    if (isAmbientProductionRuntime()) {
+      throw new AttestationConfigurationError(
+        "E_STUB_FORBIDDEN_ENVIRONMENT",
+        `The ${DEVELOPMENT_STUB_PROVIDER} provider cannot be constructed in a production process.`,
+      );
+    }
+
     this.#environmentSource = options.environmentSource ?? process.env;
     this.#logger = options.logger ?? consoleAttestationWarningLogger;
   }
