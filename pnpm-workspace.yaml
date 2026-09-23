@@ -1,4 +1,5 @@
-packages: []
+packages:
+  - packages/verifier
 
 engineStrict: true
 minimumReleaseAge: 1440

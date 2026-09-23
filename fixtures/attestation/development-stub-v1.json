@@ -1,0 +1,82 @@
+{
+  "description": "Canonical vectors for the development-only attestation stub. The stub provides no hardware assurance and must never be enabled outside development. These vectors are synthetic and contain no secrets, key identifiers, device identifiers or credentials.",
+  "schemaVersion": 1,
+  "provider": "development_stub",
+  "environment": "development",
+  "assurance": "none",
+  "domainSeparator": "Pathnod/development-stub-attestation/v1",
+  "clientDataHashByteLength": 32,
+  "proofByteLength": 32,
+  "encoding": "base64url without padding",
+  "proofDefinition": "SHA-256(UTF8(domainSeparator) || 0x00 || ASCII(purpose) || 0x00 || clientDataHash)",
+  "vectors": [
+    {
+      "name": "enrollment-zeroed-client-data-hash",
+      "purpose": "enrollment",
+      "clientDataHash": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "envelope": {
+        "schemaVersion": 1,
+        "provider": "development_stub",
+        "environment": "development",
+        "purpose": "enrollment",
+        "proof": "WcbN5PyXCKC4F3bowF2AqxuFzHSpApZGm0lMY6c7NYc"
+      }
+    },
+    {
+      "name": "observation-counting-client-data-hash",
+      "purpose": "observation",
+      "clientDataHash": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+      "envelope": {
+        "schemaVersion": 1,
+        "provider": "development_stub",
+        "environment": "development",
+        "purpose": "observation",
+        "proof": "YPaMf6YqXuDgE2N1wMtEuUZn16HWnOEQPkEDIEnAJFA"
+      }
+    }
+  ],
+  "rejectedProofs": [
+    {
+      "name": "enrollment-proof-over-trailing-nul-byte",
+      "purpose": "enrollment",
+      "clientDataHash": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "proof": "BFgpcguu12jS_vgk2fTcr_YKwtfhghLfrFI0Jkd0eKI",
+      "reason": "computed over a 33-byte input with a trailing 0x00 instead of the 32-byte client-data hash"
+    },
+    {
+      "name": "observation-proof-bound-to-enrollment",
+      "purpose": "observation",
+      "clientDataHash": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+      "proof": "3rfIZD3ZJayTF_Ice4GjHeLkuG_1cOaGaesSJW1XLS4",
+      "reason": "valid proof for the same client-data hash under the enrollment purpose"
+    },
+    {
+      "name": "enrollment-proof-truncated",
+      "purpose": "enrollment",
+      "clientDataHash": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "proof": "WcbN5PyXCKC4F3bowF2AqxuFzHSpApZGm0lMY6c7NQ",
+      "reason": "decodes to 31 bytes instead of 32"
+    },
+    {
+      "name": "enrollment-proof-with-base64-padding",
+      "purpose": "enrollment",
+      "clientDataHash": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "proof": "WcbN5PyXCKC4F3bowF2AqxuFzHSpApZGm0lMY6c7NYc=",
+      "reason": "padded base64url is not accepted"
+    },
+    {
+      "name": "enrollment-proof-with-non-canonical-trailing-bits",
+      "purpose": "enrollment",
+      "clientDataHash": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "proof": "WcbN5PyXCKC4F3bowF2AqxuFzHSpApZGm0lMY6c7NYf",
+      "reason": "unused trailing bits of the final base64url character are not zero"
+    },
+    {
+      "name": "enrollment-proof-with-invalid-alphabet",
+      "purpose": "enrollment",
+      "clientDataHash": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "proof": "WcbN5PyXCKC4F3bowF2AqxuFzHSpApZGm0lMY6c7N+c",
+      "reason": "standard base64 alphabet is not accepted"
+    }
+  ]
+}

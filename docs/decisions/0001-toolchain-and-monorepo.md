@@ -206,18 +206,24 @@ The fallback is diagnostic, not an alternative definition of done:
 
 ### 4. Repository checks
 
-For the current scaffold, which has no pnpm workspace packages or package scripts, run:
+For the current scaffold, which includes `@pathnod/verifier` as a pnpm workspace
+member with typecheck, build and test scripts, run:
 
 ```sh
 cargo +1.95.0 fmt --all -- --check
 cargo +1.95.0 check --workspace --locked
+corepack enable
 pnpm install --frozen-lockfile
 pnpm list --depth Infinity
+pnpm --filter @pathnod/verifier run typecheck
+pnpm --filter @pathnod/verifier run build
+pnpm --filter @pathnod/verifier run test
 git diff --check
 git status --short
 ```
 
-Once real JavaScript packages and their build or test scripts exist, also run:
+As more JavaScript packages and scripts are added, also run the matching
+workspace-wide checks:
 
 ```sh
 pnpm --recursive --if-present run build
