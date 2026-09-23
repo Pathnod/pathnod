@@ -41,6 +41,9 @@ impl fmt::Display for AdapterError {
 impl Error for AdapterError {}
 
 pub fn parse_canonical_field_bytes(value: &str) -> Result<[u8; 32], AdapterError> {
+    if value.len() > FIELD_MODULUS.len() {
+        return Err(AdapterError::NonCanonicalFieldElement);
+    }
     if value.is_empty()
         || (value.len() > 1 && value.starts_with('0'))
         || !value.bytes().all(|byte| byte.is_ascii_digit())

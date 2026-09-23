@@ -1,10 +1,17 @@
 export const BN254_SCALAR_FIELD =
   21888242871839275222246405745257275088548364400416034343698204186575808495617n;
+const MAX_FIELD_DECIMAL_DIGITS = BN254_SCALAR_FIELD.toString().length;
 
 export const SUPPORTED_ARITIES = new Set([1, 2, 3, 5]);
 
 export function parseCanonicalFieldElement(value: unknown): bigint {
-  if (typeof value !== "string" || !/^(0|[1-9][0-9]*)$/.test(value)) {
+  if (typeof value !== "string") {
+    throw new TypeError("field elements must be canonical unsigned base-10 strings");
+  }
+  if (value.length > MAX_FIELD_DECIMAL_DIGITS) {
+    throw new RangeError("field element decimal string is too long");
+  }
+  if (!/^(0|[1-9][0-9]*)$/.test(value)) {
     throw new TypeError("field elements must be canonical unsigned base-10 strings");
   }
 
