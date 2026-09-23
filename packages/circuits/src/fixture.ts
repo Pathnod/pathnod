@@ -4,6 +4,7 @@ import {
   assertSupportedArity,
   BN254_SCALAR_FIELD,
   parseCanonicalFieldElement,
+  SUPPORTED_ARITIES,
   toHex32,
 } from "./field.js";
 
@@ -53,8 +54,22 @@ export function validateFixture(fixture: PoseidonFixture): void {
     throw new TypeError("invalid Poseidon fixture metadata");
   }
 
+  const names = new Set<string>();
+  const coveredArities = new Set<number>();
   for (const vector of fixture.vectors) {
     assertSupportedArity(vector.arity);
+    if (
+      typeof vector.name !== "string" ||
+      vector.name.length > 100 ||
+      !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(vector.name)
+    ) {
+      throw new TypeError("Poseidon vector name must be a safe lowercase filename stem");
+    }
+    if (names.has(vector.name)) {
+      throw new TypeError(`duplicate Poseidon vector name: ${vector.name}`);
+    }
+    names.add(vector.name);
+    coveredArities.add(vector.arity);
     if (!Array.isArray(vector.inputs) || vector.inputs.length !== vector.arity) {
       throw new RangeError(`${vector.name}: input count does not match declared arity`);
     }
@@ -62,6 +77,12 @@ export function validateFixture(fixture: PoseidonFixture): void {
     const expected = parseCanonicalFieldElement(vector.expected);
     if (vector.expectedHex !== toHex32(expected)) {
       throw new TypeError(`${vector.name}: expected hexadecimal value is not canonical`);
+    }
+  }
+
+  for (const arity of SUPPORTED_ARITIES) {
+    if (!coveredArities.has(arity)) {
+      throw new RangeError(`Poseidon fixture is missing arity ${arity} coverage`);
     }
   }
 }
