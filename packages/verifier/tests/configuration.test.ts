@@ -3,7 +3,9 @@ import { describe, it } from "node:test";
 
 import {
   ATTESTATION_PROVIDER_ENVIRONMENT_VARIABLE,
+  DEVELOPMENT_STUB_ALLOWED_NODE_ENVIRONMENTS,
   NODE_ENVIRONMENT_VARIABLE,
+  PRODUCTION_NODE_ENVIRONMENT,
   evaluateDevelopmentStubEnablement,
 } from "../src/configuration.ts";
 import { DEVELOPMENT_STUB_ASSURANCE, DEVELOPMENT_STUB_PROVIDER } from "../src/contract.ts";
@@ -240,5 +242,113 @@ describe("evaluateDevelopmentStubEnablement", () => {
         );
       },
     );
+  });
+});
+
+describe("ambient production guard", () => {
+  /** The source a caller injects to opt into the stub deterministically. */
+  function injectedSource(nodeEnvironment: string): EnvironmentSource {
+    return {
+      [NODE_ENVIRONMENT_VARIABLE]: nodeEnvironment,
+      [ATTESTATION_PROVIDER_ENVIRONMENT_VARIABLE]: DEVELOPMENT_STUB_PROVIDER,
+    };
+  }
+
+  const injectedDevelopmentSources: readonly EnvironmentSource[] =
+    DEVELOPMENT_STUB_ALLOWED_NODE_ENVIRONMENTS.map(injectedSource);
+
+  it("refuses an injected development or test source while the process runs in production", () => {
+    withOwnProcessEnvironmentVariables({ [NODE_ENVIRONMENT_VARIABLE]: PRODUCTION_NODE_ENVIRONMENT }, () => {
+      for (const environmentSource of injectedDevelopmentSources) {
+        assert.deepEqual(evaluateDevelopmentStubEnablement(environmentSource), {
+          enabled: false,
+          reason: "forbidden_environment",
+        });
+        assertConfigurationFails("E_STUB_FORBIDDEN_ENVIRONMENT", environmentSource);
+      }
+    });
+  });
+
+  it("refuses a directly constructed verifier while the process runs in production", () => {
+    withOwnProcessEnvironmentVariables({ [NODE_ENVIRONMENT_VARIABLE]: PRODUCTION_NODE_ENVIRONMENT }, () => {
+      for (const environmentSource of injectedDevelopmentSources) {
+        assert.throws(
+          () => new DevelopmentStubAttestationVerifier({ environmentSource, logger: createRecordingLogger().logger }),
+          (error: unknown) => {
+            assert.ok(
+              error instanceof AttestationConfigurationError,
+              `expected an AttestationConfigurationError, got ${error}`,
+            );
+            assert.equal(error.code, "E_STUB_FORBIDDEN_ENVIRONMENT");
+            return true;
+          },
+        );
+      }
+    });
+  });
+
+  it("does not read a supplied source before rejecting the ambient production runtime", () => {
+    withOwnProcessEnvironmentVariables({ [NODE_ENVIRONMENT_VARIABLE]: PRODUCTION_NODE_ENVIRONMENT }, () => {
+      let sourceWasRead = false;
+      const environmentSource = Object.defineProperties({}, {
+        [ATTESTATION_PROVIDER_ENVIRONMENT_VARIABLE]: {
+          enumerable: true,
+          get: () => {
+            sourceWasRead = true;
+            process.env[NODE_ENVIRONMENT_VARIABLE] = "test";
+            return DEVELOPMENT_STUB_PROVIDER;
+          },
+        },
+        [NODE_ENVIRONMENT_VARIABLE]: {
+          enumerable: true,
+          value: "test",
+        },
+      }) as EnvironmentSource;
+
+      assertConfigurationFails("E_STUB_FORBIDDEN_ENVIRONMENT", environmentSource);
+      assert.equal(sourceWasRead, false);
+      assert.equal(process.env[NODE_ENVIRONMENT_VARIABLE], PRODUCTION_NODE_ENVIRONMENT);
+    });
+  });
+
+  it("revokes an already constructed verifier once the process turns to production", () => {
+    const { logger, events } = createRecordingLogger();
+    const verifier = new DevelopmentStubAttestationVerifier({ environmentSource: injectedSource("test"), logger });
+    const input = verificationInput();
+
+    assert.equal(verifier.verify(input).assurance, DEVELOPMENT_STUB_ASSURANCE);
+
+    withOwnProcessEnvironmentVariables({ [NODE_ENVIRONMENT_VARIABLE]: PRODUCTION_NODE_ENVIRONMENT }, () => {
+      assert.throws(
+        () => verifier.verify(input),
+        (error: unknown) => {
+          assert.ok(
+            error instanceof AttestationVerificationError,
+            `expected an AttestationVerificationError, got ${error}`,
+          );
+          assert.equal(error.code, "E_STUB_DISABLED");
+          return true;
+        },
+      );
+    });
+
+    assert.equal(events.length, 1, "the revoked verification emitted an acceptance warning");
+  });
+
+  it("keeps injected development and test sources usable outside a production process", () => {
+    for (const environmentSource of injectedDevelopmentSources) {
+      withoutOwnProcessEnvironmentVariables([NODE_ENVIRONMENT_VARIABLE], () => {
+        assert.deepEqual(evaluateDevelopmentStubEnablement(environmentSource), { enabled: true });
+
+        const verifier = createAttestationVerifier({ environmentSource, logger: createRecordingLogger().logger });
+
+        assert.ok(verifier instanceof DevelopmentStubAttestationVerifier);
+        assert.equal(verifier.verify(verificationInput()).assurance, DEVELOPMENT_STUB_ASSURANCE);
+      });
+
+      withOwnProcessEnvironmentVariables({ [NODE_ENVIRONMENT_VARIABLE]: "staging" }, () => {
+        assert.deepEqual(evaluateDevelopmentStubEnablement(environmentSource), { enabled: true });
+      });
+    }
   });
 });
