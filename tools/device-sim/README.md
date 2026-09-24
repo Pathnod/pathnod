@@ -33,7 +33,7 @@ The simulator advertises the **provisional** service UUID `534F5645-4C00-0000-00
 
 The signature is Ed25519 over `SHA-256(DEV_MSG_V0)`, where `DEV_MSG_V0` is the ASCII domain literal `Pathnod/challenge/v0`, followed by the challenge's nonce, big-endian epoch, hint, big-endian timestamp, big-endian counter, and 32 zero evidence-hash bytes. The draft spec calls the domain literal “24 octets”, but the actual literal is **20 ASCII bytes**. This implementation follows the literal and tests its length; the annotation should be corrected in the spec before interoperability is finalized.
 
-Malformed challenge lengths are rejected. A new valid challenge invalidates the previous response for that central, and a delayed response is emitted only if it still corresponds to the latest challenge. `RESPONSE` notifications target the subscribed central; reads return that central's latest completed response.
+Malformed challenge lengths and incomplete or overlapping write fragments are rejected as one ATT transaction. Valid fragments are assembled into one 44-byte challenge, and CoreBluetooth receives exactly one acknowledgement for the write callback. A new valid challenge invalidates the previous response for that central, and a delayed response is emitted only if it still corresponds to the latest challenge. `RESPONSE` notifications target the subscribed central; reads return that central's latest completed response.
 
 ## macOS advertising limitation
 
