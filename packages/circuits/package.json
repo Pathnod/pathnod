@@ -1,0 +1,21 @@
+{
+  "name": "@pathnod/circuits",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Cross-language Poseidon compatibility harness for Pathnod",
+  "license": "Apache-2.0",
+  "type": "module",
+  "scripts": {
+    "test": "tsc --noEmit && tsx --test test/**/*.test.ts"
+  },
+  "dependencies": {
+    "circomlib": "2.0.5",
+    "circomlibjs": "0.1.7",
+    "snarkjs": "0.7.6"
+  },
+  "devDependencies": {
+    "@types/node": "24.5.2",
+    "tsx": "4.20.6",
+    "typescript": "5.9.2"
+  }
+}

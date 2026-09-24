@@ -131,6 +131,20 @@ jobs:
       - name: Install locked dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Install pinned Circom compiler
+        shell: bash
+        run: |
+          set -euo pipefail
+          circom_bin="$RUNNER_TEMP/circom"
+          curl --fail --silent --show-error --location \
+            https://github.com/iden3/circom/releases/download/v2.2.3/circom-linux-amd64 \
+            --output "$circom_bin"
+          echo "85342c7ff332d948df7c0c50ecf201e6129349aef550ce873f3c811b79fe53a3  $circom_bin" \
+            | sha256sum --check
+          chmod +x "$circom_bin"
+          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+          test "$("$circom_bin" --version | head -n 1)" = "circom compiler 2.2.3"
+
       - name: Audit JavaScript dependencies
         run: pnpm audit --audit-level=high
 
@@ -143,6 +157,9 @@ jobs:
           set -euo pipefail
           pnpm run --if-present build
           pnpm run --if-present test
+
+      - name: Verify cross-language Poseidon vectors
+        run: pnpm --filter @pathnod/circuits test
 
       - name: Ensure pnpm install is reproducible
         run: git diff --exit-code -- package.json pnpm-lock.yaml pnpm-workspace.yaml

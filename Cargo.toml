@@ -1,5 +1,5 @@
 [workspace]
-members = ["programs/*"]
+members = ["programs/*", "tools/poseidon-vectors-rust"]
 resolver = "2"
 
 [profile.release]
