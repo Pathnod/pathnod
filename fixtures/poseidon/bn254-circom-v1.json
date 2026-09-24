@@ -1,0 +1,171 @@
+{
+  "schemaVersion": 1,
+  "algorithm": "poseidon",
+  "parameterSet": "circom-bn254-x5",
+  "fieldModulus": "21888242871839275222246405745257275088548364400416034343698204186575808495617",
+  "inputEncoding": "unsigned-base10-field-element",
+  "outputEncoding": "unsigned-base10-field-element",
+  "diagnosticHexEncoding": "32-byte-big-endian",
+  "publicTestData": true,
+  "vectors": [
+    {
+      "name": "arity-1-zero",
+      "purpose": "boundary",
+      "arity": 1,
+      "inputs": [
+        "0"
+      ],
+      "expected": "19014214495641488759237505126948346942972912379615652741039992445865937985820",
+      "expectedHex": "0x2a09a9fd93c590c26b91effbb2499f07e8f7aa12e2b4940a3aed2411cb65e11c"
+    },
+    {
+      "name": "observer-commitment",
+      "purpose": "c_obs",
+      "arity": 1,
+      "inputs": [
+        "1234567890123456789012345678901234567890"
+      ],
+      "expected": "17233478352641046290653020355207123739245241129469381061437095172858635059064",
+      "expectedHex": "0x2619cd97089689221d77e4e4c3353a4e2488fc2075f74e70bfc7c68a9e077f78"
+    },
+    {
+      "name": "arity-1-field-modulus-minus-one",
+      "purpose": "boundary",
+      "arity": 1,
+      "inputs": [
+        "21888242871839275222246405745257275088548364400416034343698204186575808495616"
+      ],
+      "expected": "3366645945435192953002076803303112651887535928162668198103357554665518664470",
+      "expectedHex": "0x0771743e7ade0f56f51d16544f60059ba3029ba556d63697612900fe5f020b16"
+    },
+    {
+      "name": "leaf-observer-class-7",
+      "purpose": "leaf",
+      "arity": 2,
+      "inputs": [
+        "17233478352641046290653020355207123739245241129469381061437095172858635059064",
+        "7"
+      ],
+      "expected": "8953888032842544939259281396982881319772013700295613483084826840973182833755",
+      "expectedHex": "0x13cbb895a3cde821c28ca44bd273fbe9dd21885793cffca5cdaad7bccdfd145b"
+    },
+    {
+      "name": "arity-2-endianness-smoke",
+      "purpose": "compatibility",
+      "arity": 2,
+      "inputs": [
+        "1",
+        "2"
+      ],
+      "expected": "7853200120776062878684798364095072458815029376092732009249414926327459813530",
+      "expectedHex": "0x115cc0f5e7d690413df64c6b9662e9cf2a3617f2743245519e19607a4417189a"
+    },
+    {
+      "name": "arity-2-light-poseidon-docs-byte-pattern",
+      "purpose": "serialization-diagnostic",
+      "arity": 2,
+      "inputs": [
+        "454086624460063511464984254936031011189294057512315937409637584344757371137",
+        "908173248920127022929968509872062022378588115024631874819275168689514742274"
+      ],
+      "expected": "6030039056180688046538272648816150486962996124743416649616624837554616801680",
+      "expectedHex": "0x0d54e1938f8a8c1c7deb5e0355f26319207b84fe9ca2ce1b26e735c829821990"
+    },
+    {
+      "name": "pseudonym-domain-pseud",
+      "purpose": "pseudonym",
+      "arity": 3,
+      "inputs": [
+        "2",
+        "1234567890123456789012345678901234567890",
+        "42"
+      ],
+      "expected": "3646738610015847336095534872857762337238361511720388141435031598670111928517",
+      "expectedHex": "0x080ffb1cd27bc0308e9a5bac4aa1f50e006147336a94925ec089fe98047170c5"
+    },
+    {
+      "name": "nullifier-domain-null",
+      "purpose": "domain-separation",
+      "arity": 5,
+      "inputs": [
+        "1",
+        "1234567890123456789012345678901234567890",
+        "42",
+        "9001",
+        "17"
+      ],
+      "expected": "17645049378019138975788972384737852615291210944901879070463565184766157885937",
+      "expectedHex": "0x2702be78d241edc76459776ae9b840eb9634f978d7b29a9eb4b8e88bd7e991f1"
+    },
+    {
+      "name": "nullifier-domain-pseud",
+      "purpose": "domain-separation",
+      "arity": 5,
+      "inputs": [
+        "2",
+        "1234567890123456789012345678901234567890",
+        "42",
+        "9001",
+        "17"
+      ],
+      "expected": "3665358295093203321984874711473303082095652627614558802471725409425232357202",
+      "expectedHex": "0x081a84ef538a4721907df94c7881df6868a94dab90448c4b0cfbc09febede752"
+    },
+    {
+      "name": "nullifier-epoch-17",
+      "purpose": "epoch-separation",
+      "arity": 5,
+      "inputs": [
+        "1",
+        "1234567890123456789012345678901234567890",
+        "42",
+        "9001",
+        "17"
+      ],
+      "expected": "17645049378019138975788972384737852615291210944901879070463565184766157885937",
+      "expectedHex": "0x2702be78d241edc76459776ae9b840eb9634f978d7b29a9eb4b8e88bd7e991f1"
+    },
+    {
+      "name": "nullifier-epoch-18",
+      "purpose": "epoch-separation",
+      "arity": 5,
+      "inputs": [
+        "1",
+        "1234567890123456789012345678901234567890",
+        "42",
+        "9001",
+        "18"
+      ],
+      "expected": "12185621075501874578916942547032901230598553985735398219647428599329093905628",
+      "expectedHex": "0x1af0d12e6e96203f8c0b244c3ddce9d3bba9e93bf81bc0737f97aebbd038ecdc"
+    },
+    {
+      "name": "nullifier-device-9001",
+      "purpose": "device-separation",
+      "arity": 5,
+      "inputs": [
+        "1",
+        "1234567890123456789012345678901234567890",
+        "42",
+        "9001",
+        "17"
+      ],
+      "expected": "17645049378019138975788972384737852615291210944901879070463565184766157885937",
+      "expectedHex": "0x2702be78d241edc76459776ae9b840eb9634f978d7b29a9eb4b8e88bd7e991f1"
+    },
+    {
+      "name": "nullifier-device-9002",
+      "purpose": "device-separation",
+      "arity": 5,
+      "inputs": [
+        "1",
+        "1234567890123456789012345678901234567890",
+        "42",
+        "9002",
+        "17"
+      ],
+      "expected": "17574256084285661166620848149056678994606343438366015191994093484300605836222",
+      "expectedHex": "0x26daad2b9daa7365540a13b9cb8cccc6e36cf673406e5a5f9115caba8c57cbbe"
+    }
+  ]
+}
