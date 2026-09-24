@@ -212,10 +212,12 @@ against that text character for character. The same suite asserts that
 `NSLocalNetworkUsageDescription`, `NSBluetoothPeripheralUsageDescription`,
 `NSSupportsLiveActivities` and `NSUserTrackingUsageDescription` are absent.
 
-## Platform gaps
+## Initial platform gaps
 
-Honest limits of the current state. The architecture host is Linux, with no
-macOS, Xcode, simulator, code signing or iPhone. Therefore:
+The following records the initial Linux-only validation, before the Mac and
+iPhone checks reported below. Pending statements in this historical list refer
+to that initial review, not the current validation status. The architecture host
+had no macOS, Xcode, simulator, code signing or iPhone:
 
 - The Foundation-only `PathnodDensityCore` sources and tests were copied
   unchanged into an isolated Swift 6.0 Linux package and compiled successfully;
@@ -244,7 +246,27 @@ macOS, Xcode, simulator, code signing or iPhone. Therefore:
   says nothing at all about scanning.
 - The acceptance matrix below is therefore pending, not passed.
 
-## Validation on Kazai's Mac and iPhone
+### Mac and iPhone validation update
+
+I completed the guided Mac, simulator and physical-iPhone validation
+successfully for application commit
+`8416873812610440731d943c9367ee0ddec5d992`, using Xcode 26.6. I checked
+Swift package tests in Debug and Release, Xcode build and hosted tests, device
+signing and installation, and the manual sequence below. This is my manual
+validation record; it does not extend the original security review. I kept
+local signing settings and Xcode's project serialization changes outside the
+committed project.
+
+I tested classification and deduplication with an iPad running LightBlue
+as a controlled BLE advertiser. Its service UUID must be present in the
+advertisement received by the scanner, not merely in the peripheral's GATT
+service list. Keep LightBlue in the foreground during this test. A simulated
+Helium signature validates classification, not real Hotspot or network density.
+
+I added screenshots to PR #10. I have not attached device/OS details, raw
+test logs, exports or quantitative battery/thermal observations to this record.
+
+## Validation procedure on Mac and iPhone
 
 Prerequisites: a stable Xcode, a connected and trusted physical iPhone,
 Developer Mode enabled if Xcode asks, Bluetooth on, and an Apple Account added
@@ -332,8 +354,10 @@ xcrun devicectl device install app --device '<IPHONE_UDID>' \
    python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); assert d["schemaVersion"]==1; assert sum(d["counts"].values())==d["uniqueAdvertisers"]' <export>
    ```
 
-6. Inspect the export and the redacted logs for any UUID, name, address, raw
-   manufacturer or service payload, location field or per-device row.
+6. Inspect the export and the redacted logs for peripheral identifiers, device
+   names, addresses, raw manufacturer or service payloads, location fields or
+   per-device rows. The random session UUID and public rule references are
+   expected and are not peripheral identifiers.
 7. Run the two-hour foreground rehearsal. Record crashes, process termination,
    battery drain, thermal warnings, counter freezes and export success.
 
@@ -346,23 +370,25 @@ certificate, UDID or personal path.
 
 ## Physical-device acceptance matrix
 
-Pending until the procedure above is executed.
+The results below record my successful guided manual validation. I have not
+attached supporting artifacts here or separately documented restricted-device
+policy states beyond the denied-permission test.
 
 | # | Check | Status |
 |---|---|---|
-| 1 | Fresh permission prompt shows the committed explanation | pending |
-| 2 | Allowed scan advances elapsed time and counters | pending |
-| 3 | Denied or restricted never pretends to scan | pending |
-| 4 | Bluetooth off then on recovers with an explicit Start or Resume | pending |
-| 5 | A repeated known advertiser is counted once | pending |
-| 6 | A matched rule reports only rule, source and confidence, in aggregate | pending |
-| 7 | An unrecognised advertiser stays `unknown` | pending |
-| 8 | App switch and screen lock interrupt without a background claim | pending |
-| 9 | Resume preserves the in-memory aggregates | pending |
-| 10 | Export is schema v1 and the totals reconcile | pending |
-| 11 | Export and log privacy inspection passes | pending |
-| 12 | Delete and New session clear the state | pending |
-| 13 | Two-hour foreground rehearsal exports without crashing; battery and thermal recorded | pending |
+| 1 | Fresh permission prompt shows the committed explanation | passed manually |
+| 2 | Allowed scan advances elapsed time and counters | passed manually |
+| 3 | Denied or restricted never pretends to scan | denied passed manually; restricted not separately documented |
+| 4 | Bluetooth off then on recovers with an explicit Start or Resume | passed manually |
+| 5 | A repeated known advertiser is counted once | passed manually; controlled iPad advertiser |
+| 6 | A matched rule reports only rule, source and confidence, in aggregate | passed manually; simulated Helium signature |
+| 7 | An unrecognised advertiser stays `unknown` | passed manually |
+| 8 | App switch and screen lock interrupt without a background claim | passed manually |
+| 9 | Resume preserves the in-memory aggregates | passed manually |
+| 10 | Export is schema v1 and the totals reconcile | passed manually |
+| 11 | Export and log privacy inspection passes | passed manually |
+| 12 | Delete and New session clear the state | passed manually |
+| 13 | Two-hour foreground rehearsal exports without crashing; battery and thermal recorded | rehearsal passed manually; measurements not attached |
 
 ## Field-study handoff
 
@@ -378,5 +404,6 @@ totals with the rule and confidence breakdown, the expected partner or test
 devices, the unknown share, the BLE-only and non-location caveats, and the
 decision — including a missions-first fallback if density is near zero.
 
-DEV-08 does not fabricate field measurements. Until the procedure runs, this
-ADR records a reviewed implementation and an untested build.
+DEV-08 does not fabricate field measurements. This ADR now records a reviewed
+implementation and my Mac/iPhone validation. A measured field-study
+report remains separate from the controlled classification test.

@@ -81,9 +81,10 @@ Exports remain aggregate schema-v1 documents. Category and rule totals must reco
 
 These checks validate portable logic and static configuration. They are not macOS, simulator or iPhone evidence.
 
-## Required Apple-platform evidence
+## Apple-platform evidence outstanding at the original review
 
-The following acceptance evidence remains pending for exact commit `e3fa2f91280157b6e1baab910a6779f0953833b0`:
+At the Linux review, the following acceptance evidence was pending for exact
+commit `e3fa2f91280157b6e1baab910a6779f0953833b0`:
 
 - successful `swift test --package-path apps/ios --filter PathnodDensityCoreTests` on macOS;
 - successful generic iOS Simulator build and hosted scheme tests;
@@ -95,3 +96,19 @@ The following acceptance evidence remains pending for exact commit `e3fa2f912801
 - visible lower-bound warning when the retained-identity limit is exceeded;
 - two-hour foreground rehearsal with peak memory near the advertiser bound, battery, thermal, crash and final export observations;
 - hardware confirmation that scan stopping remains correct when CoreBluetooth changes state and `CBCentralManager.isScanning` changes around the callback.
+
+### Subsequent manual validation
+
+I completed Mac/Xcode and physical-iPhone testing successfully
+on application commit `8416873812610440731d943c9367ee0ddec5d992`. I checked
+Swift Debug/Release and Xcode tests, build and installation,
+Bluetooth permission/recovery, foreground lifecycle and explicit Resume,
+classification/deduplication with a LightBlue advertiser on iPad, aggregate
+export and reset, and the foreground rehearsal. See the updated acceptance
+matrix in [ADR 0003](decisions/0003-foreground-ble-density-scan.md).
+
+This update records my manual validation; it does not repeat or extend
+the security review above. I added screenshots to PR #10. I have not
+attached raw artifacts or quantitative measurements here, or separately
+documented managed-device restricted states, induced radio reset/unknown
+callback races, or physical-device stress near the 50,000-identity bound.
