@@ -27,7 +27,7 @@ relays, and dishonest operators remain part of the threat model.
 ## Repository map
 
 ```text
-apps/ios/            Swift attestation package for the future iOS observer app
+apps/ios/            Swift packages and the foreground BLE density-scan app
 apps/dashboard/      operator dashboard
 firmware/esp32/      BLE device firmware
 tools/device-sim/    device simulator
@@ -45,9 +45,18 @@ running system yet.
 - `packages/verifier` implements the development-only attestation verifier:
   envelope parsing, strict unpadded base64url decoding, and a constant-time
   proof comparison. It has no HTTP endpoint, storage, or real provider.
-- `apps/ios` is a Swift package holding the attestation provider contract and
-  its development-only stub. It is not an iOS application: there is no Xcode
-  project, UI, BLE code, or App Attest integration.
+- `apps/ios` holds a Swift package with two products — `PathnodAttestation`, the
+  attestation provider contract and its development-only stub, and
+  `PathnodDensityCore`, the Foundation-only classification, accumulation and
+  export logic of the density study — plus `Pathnod.xcodeproj` and the
+  `PathnodDensityScan` app that uses them.
+- `PathnodDensityScan` is a measurement instrument for a two-hour field study,
+  not the observer app: it counts BLE advertisers visible while it is open,
+  never connects, never runs in the background, never asks for location, and
+  exports aggregate counters only. It carries no App Attest integration and none
+  of the production discovery protocol. See
+  [ADR 0003](docs/decisions/0003-foreground-ble-density-scan.md), including the
+  limits that have not been verified yet.
 - Both sides only implement the development stub, which carries no hardware
   assurance. See
   [ADR 0002](docs/decisions/0002-development-attestation.md).
@@ -79,6 +88,7 @@ artifacts, or build output.
 
 - [Toolchain and monorepo baseline](docs/decisions/0001-toolchain-and-monorepo.md)
 - [Development-only attestation stubs](docs/decisions/0002-development-attestation.md)
+- [Foreground BLE density scan](docs/decisions/0003-foreground-ble-density-scan.md)
 
 ## Contributing
 
