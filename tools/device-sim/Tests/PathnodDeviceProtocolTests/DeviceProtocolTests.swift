@@ -63,6 +63,38 @@ final class DeviceProtocolTests: XCTestCase {
         ))
     }
 
+    func testChallengeFragmentsAreAssembledBeforeValidation() throws {
+        let expected = try challenge()
+        let wireData = expected.wireData()
+
+        XCTAssertEqual(try DeviceProtocolV0.Challenge(fragments: [
+            .init(offset: 0, value: wireData)
+        ]), expected)
+        XCTAssertEqual(try DeviceProtocolV0.Challenge(fragments: [
+            .init(offset: 20, value: wireData.subdata(in: 20..<44)),
+            .init(offset: 0, value: wireData.subdata(in: 0..<20))
+        ]), expected)
+    }
+
+    func testIncompleteOrOverlappingChallengeFragmentsAreRejected() throws {
+        let wireData = try challenge().wireData()
+        let invalid: [[DeviceProtocolV0.ChallengeFragment]] = [
+            [],
+            [.init(offset: 0, value: wireData.subdata(in: 0..<43))],
+            [.init(offset: 0, value: wireData), .init(offset: 0, value: Data([0]))],
+            [.init(offset: -1, value: wireData)],
+            [.init(offset: 1, value: wireData)],
+            [.init(offset: 44, value: Data([0]))],
+            [.init(offset: 0, value: Data())],
+        ]
+
+        for fragments in invalid {
+            XCTAssertThrowsError(try DeviceProtocolV0.Challenge(fragments: fragments)) {
+                XCTAssertEqual($0 as? DeviceProtocolV0.EncodingError, .invalidChallengeFragments)
+            }
+        }
+    }
+
     func testInfoHasCanonicalLayout() throws {
         let key = Curve25519.Signing.PrivateKey().publicKey.rawRepresentation
         let info = try DeviceProtocolV0.info(publicKey: key)

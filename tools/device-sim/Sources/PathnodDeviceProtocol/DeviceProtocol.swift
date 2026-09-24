@@ -15,12 +15,24 @@ public enum DeviceProtocolV0 {
 
     public enum EncodingError: Error, Equatable {
         case invalidChallengeLength
+        case invalidChallengeFragments
         case invalidNonceLength
         case invalidObservationHintLength
         case invalidEvidenceHashLength
         case invalidPublicKeyLength
         case invalidSignatureLength
         case evidenceTooLong
+    }
+
+    /// One ATT write fragment. The complete challenge is assembled before it is accepted.
+    public struct ChallengeFragment: Sendable {
+        public let offset: Int
+        public let value: Data
+
+        public init(offset: Int, value: Data) {
+            self.offset = offset
+            self.value = value
+        }
     }
 
     public struct Challenge: Equatable, Sendable {
@@ -45,6 +57,30 @@ public enum DeviceProtocolV0 {
                 observationEpoch: wireData[32..<36].reduce(UInt32(0)) { ($0 << 8) | UInt32($1) },
                 observationHint: wireData.subdata(in: 36..<44)
             )
+        }
+
+        public init(fragments: [ChallengeFragment]) throws {
+            guard !fragments.isEmpty else { throw EncodingError.invalidChallengeFragments }
+            var wireData = Data(repeating: 0, count: DeviceProtocolV0.challengeLength)
+            var written = [Bool](repeating: false, count: DeviceProtocolV0.challengeLength)
+
+            for fragment in fragments {
+                guard fragment.offset >= 0,
+                      fragment.offset < DeviceProtocolV0.challengeLength,
+                      !fragment.value.isEmpty,
+                      fragment.value.count <= DeviceProtocolV0.challengeLength - fragment.offset else {
+                    throw EncodingError.invalidChallengeFragments
+                }
+                for (position, byte) in fragment.value.enumerated() {
+                    let index = fragment.offset + position
+                    guard !written[index] else { throw EncodingError.invalidChallengeFragments }
+                    wireData[index] = byte
+                    written[index] = true
+                }
+            }
+
+            guard written.allSatisfy({ $0 }) else { throw EncodingError.invalidChallengeFragments }
+            try self.init(wireData: wireData)
         }
 
         public func wireData() -> Data {

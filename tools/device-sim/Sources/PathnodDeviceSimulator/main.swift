@@ -160,27 +160,35 @@ private final class DevicePeripheral: NSObject, @preconcurrency CBPeripheralMana
     }
 
     func peripheralManager(_ peripheral: CBPeripheralManager, didReceiveWrite requests: [CBATTRequest]) {
-        for request in requests {
-            guard request.characteristic.uuid == challengeCharacteristic.uuid else {
-                peripheral.respond(to: request, withResult: .requestNotSupported)
-                continue
-            }
-            guard let value = request.value,
-                  let challenge = try? DeviceProtocolV0.Challenge(wireData: value) else {
-                peripheral.respond(to: request, withResult: .invalidAttributeValueLength)
-                simLog("Malformed challenge rejected")
-                continue
-            }
-            let id = request.central.identifier
-            generationByCentral[id, default: 0] &+= 1
-            let generation = generationByCentral[id]!
-            responseByCentral.removeValue(forKey: id)
-            queuedNotifications.removeValue(forKey: id)
-            peripheral.respond(to: request, withResult: .success)
-            simLog("Challenge received; response scheduled after \(delayMilliseconds) ms")
-            DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(delayMilliseconds)) { [weak self] in
-                self?.emitResponse(for: challenge, central: request.central, generation: generation)
-            }
+        guard let first = requests.first else { return }
+        guard let challengeCharacteristic,
+              requests.allSatisfy({
+                  $0.characteristic.uuid == challengeCharacteristic.uuid &&
+                  $0.central.identifier == first.central.identifier
+              }) else {
+            peripheral.respond(to: first, withResult: .requestNotSupported)
+            return
+        }
+
+        let fragments = requests.compactMap { request in
+            request.value.map { DeviceProtocolV0.ChallengeFragment(offset: request.offset, value: $0) }
+        }
+        guard fragments.count == requests.count,
+              let challenge = try? DeviceProtocolV0.Challenge(fragments: fragments) else {
+            peripheral.respond(to: first, withResult: .invalidAttributeValueLength)
+            simLog("Malformed challenge rejected")
+            return
+        }
+
+        let id = first.central.identifier
+        generationByCentral[id, default: 0] &+= 1
+        let generation = generationByCentral[id]!
+        responseByCentral.removeValue(forKey: id)
+        queuedNotifications.removeValue(forKey: id)
+        peripheral.respond(to: first, withResult: .success)
+        simLog("Challenge received; response scheduled after \(delayMilliseconds) ms")
+        DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(delayMilliseconds)) { [weak self] in
+            self?.emitResponse(for: challenge, central: first.central, generation: generation)
         }
     }
 
