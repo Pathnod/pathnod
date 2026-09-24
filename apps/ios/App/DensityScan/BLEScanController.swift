@@ -1,0 +1,583 @@
+import CoreBluetooth
+import Foundation
+import OSLog
+import PathnodDensityCore
+import SwiftUI
+
+protocol CentralScanning: AnyObject {
+  var currentState: CBManagerState { get }
+  var isScanning: Bool { get }
+  func startGenericScan()
+  func stopScanning()
+}
+
+extension CBCentralManager: CentralScanning {
+  var currentState: CBManagerState { state }
+
+  func startGenericScan() {
+    scanForPeripherals(
+      withServices: nil,
+      options: [CBCentralManagerScanOptionAllowDuplicatesKey: true]
+    )
+  }
+
+  func stopScanning() {
+    stopScan()
+  }
+}
+
+/// Drives one foreground density session.
+///
+/// Everything this type does happens while the app is in the foreground. There
+/// is no `bluetooth-central` background mode, no state restoration identifier,
+/// no Live Activity, and no connection: ``CBCentralManager/connect(_:options:)``
+/// is never called, and the discovered `CBPeripheral` is not retained. The only
+/// thing taken from a peripheral is its `identifier`, immediately wrapped in a
+/// ``PeripheralKey`` that cannot be printed, encoded or exported.
+@MainActor
+final class BLEScanController: NSObject, ObservableObject {
+  /// The disclosure the user sees before the first scan, and again in the
+  /// About sheet. It states the limits of the study rather than selling it.
+  static let disclosure = """
+    This app counts Bluetooth Low Energy advertisers that are visible while \
+    the app is open.
+
+    • Scanning happens only while the app is in the foreground. Switching \
+    apps or locking the screen stops it, and resuming is always an explicit \
+    tap.
+    • It never connects to a device, and never reads anything from one.
+    • It never collects your location, and never asks for location access.
+    • A device identifier is used only as an ephemeral in-memory \
+    deduplication key. Device names and raw advertising payloads are not \
+    retained. None of them is displayed, logged or exported.
+    • An export contains aggregate counters only.
+
+    "Visible" means the phone received an advertisement. It does not prove \
+    that a device belongs to any network, is online, or belongs to anyone in \
+    particular.
+    """
+
+  @Published private(set) var summary: SessionSummary
+  @Published private(set) var availability: RadioAvailability = .unknown
+  @Published private(set) var hasAcknowledgedDisclosure = false
+
+  /// Set when the shipped ruleset was rejected. The session still runs, with
+  /// every advertiser reported `unknown`.
+  @Published private(set) var rulesetFailure: String?
+
+  /// Set when an export could not be produced or written.
+  @Published private(set) var exportFailure: String?
+
+  /// The cached export of the finished session, if one was produced.
+  @Published private(set) var exportURL: URL?
+
+  /// True between the Start tap and the first usable radio state, which is
+  /// also when the system asks for Bluetooth permission. The session clock has
+  /// not started yet, so answering the prompt is not an interruption.
+  @Published private(set) var isAwaitingRadio = false
+
+  let rulesetVersion: String
+  let applicationVersion: String
+
+  private let accumulator: SessionAccumulator
+  private let store: DensityExportStore
+  private let registry: ClassificationRegistry
+  private let log = Logger(subsystem: "xyz.pathnod.densityscan", category: "density-scan")
+
+  typealias CentralFactory = (CBCentralManagerDelegate) -> CentralScanning
+
+  /// Created on the first Start, so the system permission prompt appears when
+  /// the user asks for a scan rather than when the app launches.
+  private var central: CentralScanning?
+  private let makeCentral: CentralFactory
+  private var ticker: Timer?
+  private var exportData: Data?
+  private var isSceneActive = true
+
+  init(
+    store: DensityExportStore = DensityExportStore(),
+    advertiserLimit: Int = SessionAccumulator.defaultAdvertiserLimit,
+    clock: any DensityClock = SystemDensityClock(),
+    makeCentral: @escaping CentralFactory = { delegate in
+      CBCentralManager(delegate: delegate, queue: .main)
+    }
+  ) {
+    self.store = store
+    self.makeCentral = makeCentral
+
+    var failure: String?
+    var loaded: ClassificationRegistry
+    do {
+      loaded = try ClassificationRules.makeRegistry()
+    } catch {
+      loaded = .unavailable
+      failure =
+        "The classification ruleset was rejected (\(error)). Every advertiser is reported as unknown."
+    }
+
+    registry = loaded
+    rulesetVersion = loaded.version
+    accumulator = SessionAccumulator(
+      classifier: AdvertisementClassifier(registry: loaded),
+      clock: clock,
+      advertiserLimit: advertiserLimit
+    )
+    applicationVersion = Self.readApplicationVersion()
+    summary = accumulator.summary
+
+    super.init()
+
+    rulesetFailure = failure
+    if let failure {
+      log.error("ruleset_rejected \(failure, privacy: .public)")
+    }
+
+    // Nothing survives a launch: a cached export from a previous run of the
+    // process is deleted before the user can reach it.
+    _ = clearCachedExport()
+    log.notice("launched ruleset=\(loaded.version, privacy: .public) rules=\(loaded.rules.count)")
+  }
+
+  // MARK: - Session commands
+
+  func acknowledgeDisclosure() {
+    hasAcknowledgedDisclosure = true
+  }
+
+  /// Asks for a session.
+  ///
+  /// The central manager is created here, so the system permission prompt
+  /// appears on the first Start rather than at launch. The session itself only
+  /// begins once the radio reports that it can scan: a session that started
+  /// while Bluetooth was still answering a permission prompt would count an
+  /// interruption the user never caused, and would report foreground seconds
+  /// during which nothing was scanned.
+  func start() {
+    guard hasAcknowledgedDisclosure,
+      accumulator.state == .idle,
+      !isAwaitingRadio,
+      isSceneActive
+    else { return }
+
+    exportFailure = nil
+    guard clearCachedExport() else { return }
+    isAwaitingRadio = true
+
+    if central == nil {
+      central = makeCentral(self)
+    }
+    if let central, central.currentState != .unknown {
+      // A manager that already exists may not emit another state callback just
+      // because Start was tapped again. Apply its current state immediately so
+      // denied, unsupported, powered-off and resetting states cannot leave the
+      // UI stuck on "Starting…".
+      applyRadioState(central.currentState)
+    }
+  }
+
+  private func beginSession() {
+    guard isSceneActive, accumulator.state == .idle else { return }
+    isAwaitingRadio = false
+    accumulator.start()
+    log.notice("session_started ruleset=\(self.rulesetVersion, privacy: .public)")
+    beginScanIfPossible()
+    startTicking()
+    refresh()
+  }
+
+  /// Pauses at the user's request. Identical to a lifecycle interruption: both
+  /// require an explicit Resume.
+  func pause() {
+    interrupt(reason: "user")
+  }
+
+  /// Resumes after an explicit tap. Refused while the radio cannot scan, so
+  /// the screen never shows "Scanning" over a session that is not.
+  func resume() {
+    guard accumulator.state == .interrupted,
+      isRadioReadyNow,
+      isSceneActive
+    else { return }
+    accumulator.resume()
+    log.notice("session_resumed interruptions=\(self.summary.interruptionCount)")
+    beginScanIfPossible()
+    startTicking()
+    refresh()
+  }
+
+  /// Drops a Start that is still waiting for its first usable radio state.
+  ///
+  /// The session clock never started, so there is nothing to stop and nothing
+  /// to count: the controller simply goes back to idle, and Start can be tapped
+  /// again. A cancelled Start is not an interruption of anything.
+  func cancelPendingStart() {
+    guard isAwaitingRadio else { return }
+    isAwaitingRadio = false
+    refresh()
+    log.notice("start_cancelled")
+  }
+
+  func stop() {
+    guard accumulator.state == .scanning || accumulator.state == .interrupted else { return }
+    stopScan()
+    stopTicking()
+    accumulator.finish()
+    refresh()
+    log.notice(
+      """
+      session_finished unique=\(self.summary.uniqueAdvertisers) \
+      foregroundSeconds=\(self.summary.foregroundScanSeconds) \
+      interruptions=\(self.summary.interruptionCount)
+      """
+    )
+  }
+
+  /// Delete: drops the result and every cached byte of it.
+  func discardResult() {
+    stopScan()
+    stopTicking()
+    exportFailure = nil
+    guard clearCachedExport() else {
+      refresh()
+      return
+    }
+    isAwaitingRadio = false
+    accumulator.reset()
+    refresh()
+    log.notice("session_discarded")
+  }
+
+  /// New session: discard, then start again immediately.
+  func startNewSession() {
+    discardResult()
+    guard exportFailure == nil else { return }
+    start()
+  }
+
+  // MARK: - Export
+
+  /// Builds, validates and caches the schema-v1 export.
+  ///
+  /// Failure is reported, never papered over: a session whose counters do not
+  /// reconcile produces no file at all.
+  func exportResult() {
+    guard accumulator.state == .finished else { return }
+
+    do {
+      let document = try DensityExport.makeDocument(
+        from: accumulator.summary,
+        appVersion: applicationVersion
+      )
+      let data = try DensityExport.encode(document)
+      exportURL = try store.write(data, named: DensityExport.fileName(for: document))
+      exportData = data
+      exportFailure = nil
+      log.notice("export_written bytes=\(data.count) unique=\(document.uniqueAdvertisers)")
+    } catch {
+      exportURL = nil
+      exportData = nil
+      exportFailure = Self.describe(error)
+      log.error("export_failed \(Self.describe(error), privacy: .public)")
+    }
+  }
+
+  /// The current export, for the system file exporter. Aggregate counters
+  /// only, so keeping the bytes in memory costs nothing and discloses nothing.
+  var exportDocument: DensityExportDocument? {
+    exportData.map(DensityExportDocument.init(data:))
+  }
+
+  var exportFileName: String {
+    exportURL?.lastPathComponent ?? "pathnod-density.json"
+  }
+
+  // MARK: - Lifecycle
+
+  /// Stops scanning as soon as the app stops being fully foreground.
+  ///
+  /// `.inactive` covers the notification-centre pull, the app switcher and the
+  /// moment the screen locks; `.background` covers the rest. Coming back to
+  /// `.active` deliberately does nothing: the user has to tap Resume.
+  func handleScenePhase(_ phase: ScenePhase) {
+    switch phase {
+    case .active:
+      isSceneActive = true
+      if isAwaitingRadio, central?.currentState == .poweredOn {
+        beginSession()
+      }
+      refresh()
+    case .inactive, .background:
+      isSceneActive = false
+      interrupt(reason: "lifecycle")
+    @unknown default:
+      isSceneActive = false
+      interrupt(reason: "lifecycle")
+    }
+  }
+
+  // MARK: - View helpers
+
+  var canStart: Bool {
+    hasAcknowledgedDisclosure && isSceneActive && summary.state == .idle && !isAwaitingRadio
+  }
+  var canCancelPendingStart: Bool { isAwaitingRadio }
+  var canPause: Bool { summary.state == .scanning }
+  var canResume: Bool {
+    summary.state == .interrupted && isRadioReadyNow && isSceneActive
+  }
+  var canStop: Bool { summary.state == .scanning || summary.state == .interrupted }
+  var canExport: Bool { summary.state == .finished }
+  var canDiscard: Bool { summary.state == .finished }
+
+  /// What the radio is doing, in the user's terms. It never claims to be
+  /// scanning when it is not.
+  var availabilityMessage: String? {
+    switch availability {
+    case .ready:
+      return nil
+    case .unknown:
+      if central == nil {
+        return "Bluetooth is checked when you start a session."
+      }
+      return isAwaitingRadio
+        ? "Waiting for Bluetooth to report its state. If iOS is asking for permission, answer it to continue."
+        : "Bluetooth is not reporting a usable state. Scanning is stopped until it does, then resume the session."
+    case .unsupported:
+      return "This device does not support Bluetooth Low Energy scanning. No session can run."
+    case .unauthorized:
+      return
+        "Bluetooth access is off for this app. Allow it in Settings › Privacy & Security › Bluetooth, then start a session."
+    case .poweredOff:
+      return
+        "Bluetooth is off. Turn it on in Settings or Control Centre, then start or resume the session."
+    case .resetting:
+      return "The Bluetooth connection is resetting. Scanning is paused until it comes back."
+    }
+  }
+
+  // MARK: - Scanning
+
+  /// Whether the radio can scan *now*, rather than when it last said so.
+  ///
+  /// `availability` is a record of the last delivered callback. CoreBluetooth
+  /// can change state before its main-queue callback arrives, so a published
+  /// ready state on its own would let Resume promise a scan the manager then
+  /// refuses to start. Both readings must agree.
+  private var isRadioReadyNow: Bool {
+    availability.allowsScanning && central?.currentState == .poweredOn
+  }
+
+  private func beginScanIfPossible() {
+    guard accumulator.state == .scanning,
+      isSceneActive,
+      let central,
+      central.currentState == .poweredOn
+    else { return }
+
+    // A generic scan: no service filter, because the study counts everything
+    // that advertises. Duplicates are allowed so a later, stronger
+    // advertisement from a peripheral already seen can sharpen its category;
+    // they cost battery, which the two-hour rehearsal is there to measure.
+    central.startGenericScan()
+    log.notice("scan_started")
+  }
+
+  private func stopScan() {
+    // A scan may still be active while CoreBluetooth reports `.unknown` or
+    // `.resetting`. Stop the active operation instead of trusting the new
+    // availability, then move the session to its interrupted state.
+    guard let central, central.isScanning else { return }
+    central.stopScanning()
+    log.notice("scan_stopped")
+  }
+
+  private func interrupt(reason: StaticString) {
+    guard accumulator.state == .scanning else { return }
+    stopScan()
+    stopTicking()
+    accumulator.interrupt()
+    refresh()
+    log.notice("session_interrupted reason=\(reason) count=\(self.summary.interruptionCount)")
+  }
+
+  func refresh() {
+    summary = accumulator.summary
+  }
+
+  /// Narrows and records one callback. Internal so deterministic app tests can
+  /// exercise the same presentation update and reset path without a BLE radio.
+  func record(peripheralID: UUID, advertisementData: [String: Any]) {
+    let key = PeripheralKey(peripheralID)
+    let snapshot = Self.snapshot(from: advertisementData, registry: registry)
+    let known = accumulator.uniqueAdvertisers
+    accumulator.record(peripheral: key, advertisement: snapshot)
+
+    // Duplicates are allowed, so in a busy street most callbacks do not change
+    // the retained total. Publish new retained identities immediately; the
+    // one-second ticker publishes reclassifications and dropped sightings.
+    if accumulator.uniqueAdvertisers != known {
+      refresh()
+    }
+  }
+
+  private func startTicking() {
+    stopTicking()
+    // Only drives the elapsed-time labels; counters update on each sighting.
+    let timer = Timer(timeInterval: 1, repeats: true) { [weak self] _ in
+      MainActor.assumeIsolated {
+        guard let self else { return }
+        self.refresh()
+      }
+    }
+    RunLoop.main.add(timer, forMode: .common)
+    ticker = timer
+  }
+
+  private func stopTicking() {
+    ticker?.invalidate()
+    ticker = nil
+  }
+
+  @discardableResult
+  private func clearCachedExport() -> Bool {
+    do {
+      try store.clear()
+      exportURL = nil
+      exportData = nil
+      return true
+    } catch {
+      let message = "Cached exports could not be deleted: \(Self.describe(error))"
+      exportFailure = message
+      log.error("export_cache_clear_failed \(message, privacy: .public)")
+      return false
+    }
+  }
+
+  // MARK: - Helpers
+
+  private static func readApplicationVersion() -> String {
+    let info = Bundle.main.infoDictionary
+    let short = info?["CFBundleShortVersionString"] as? String ?? "0.0.0"
+    let build = info?["CFBundleVersion"] as? String ?? "0"
+    return "\(short) (\(build))"
+  }
+
+  /// Error text is for the user and the log, so it must stay free of anything
+  /// a peripheral supplied. Every error surfaced here originates in this app.
+  private static func describe(_ error: Error) -> String {
+    if let exportError = error as? DensityExportError {
+      return String(describing: exportError)
+    }
+    return (error as NSError).localizedDescription
+  }
+
+  /// Reduces one advertisement to the few facts an active rule needs.
+  ///
+  /// The shipped ruleset declares one service UUID and no company identifier,
+  /// so this reads the advertised service list and no manufacturer byte at
+  /// all. The local-name entry is never accessed. Everything else in the
+  /// dictionary, including the RSSI passed to the delegate, is dropped here.
+  nonisolated static func snapshot(
+    from advertisementData: [String: Any],
+    registry: ClassificationRegistry
+  ) -> AdvertisementSnapshot {
+    var services: Set<ServiceUUID> = []
+    if registry.inspectsServiceUUIDs,
+      let advertised = advertisementData[CBAdvertisementDataServiceUUIDsKey] as? [CBUUID]
+    {
+      for uuid in advertised {
+        if let parsed = ServiceUUID(uuid.uuidString) {
+          services.insert(parsed)
+        }
+      }
+    }
+
+    var manufacturer: ManufacturerData?
+    if !registry.inspectedCompanyIdentifiers.isEmpty,
+      let raw = advertisementData[CBAdvertisementDataManufacturerDataKey] as? Data
+    {
+      manufacturer = registry.manufacturerDataToInspect(rawAdvertisement: raw)
+    }
+
+    return AdvertisementSnapshot(
+      serviceUUIDs: services,
+      manufacturerData: manufacturer,
+      carriesLocalName: false
+    )
+  }
+}
+
+// MARK: - CBCentralManagerDelegate
+
+extension BLEScanController: CBCentralManagerDelegate {
+  nonisolated func centralManagerDidUpdateState(_ central: CBCentralManager) {
+    // The manager was created with the main queue, so the callback is
+    // already on the main actor.
+    MainActor.assumeIsolated {
+      applyRadioState(central.state)
+    }
+  }
+
+  nonisolated func centralManager(
+    _ central: CBCentralManager,
+    didDiscover peripheral: CBPeripheral,
+    advertisementData: [String: Any],
+    rssi _: NSNumber
+  ) {
+    MainActor.assumeIsolated {
+      // The peripheral is not retained, not connected to, and not named:
+      // only its identifier crosses this line, wrapped so it cannot leave.
+      record(peripheralID: peripheral.identifier, advertisementData: advertisementData)
+    }
+  }
+
+  /// Reads one CoreBluetooth state in the app's own vocabulary.
+  ///
+  /// The raw value is mapped rather than the enum case, because a state added
+  /// by a future iOS arrives as a value this SDK has no case for. Taking the
+  /// `Int` makes that fallback reachable from a test instead of only from a
+  /// future device. Anything this build cannot name is `unknown`: an app that
+  /// cannot name a state must not claim to be scanning under it.
+  static func availability(forRawState rawValue: Int) -> RadioAvailability {
+    switch rawValue {
+    case CBManagerState.poweredOn.rawValue: return .ready
+    case CBManagerState.poweredOff.rawValue: return .poweredOff
+    case CBManagerState.unauthorized.rawValue: return .unauthorized
+    case CBManagerState.unsupported.rawValue: return .unsupported
+    case CBManagerState.resetting.rawValue: return .resetting
+    case CBManagerState.unknown.rawValue: return .unknown
+    default: return .unknown
+    }
+  }
+
+  func applyRadioState(_ state: CBManagerState) {
+    applyRadioState(rawState: state.rawValue)
+  }
+
+  func applyRadioState(rawState: Int) {
+    availability = Self.availability(forRawState: rawState)
+
+    log.notice("radio_state \(String(describing: self.availability), privacy: .public)")
+
+    let decision = RadioGate.decide(
+      availability: availability,
+      session: accumulator.state,
+      isAwaitingStart: isAwaitingRadio
+    )
+
+    if decision.cancelsPendingStart {
+      isAwaitingRadio = false
+    }
+
+    switch decision.effect {
+    case .beginSession:
+      // The user asked for a session and the radio is finally usable.
+      beginSession()
+    case .interrupt:
+      interrupt(reason: "radio")
+    case .hold:
+      break
+    }
+    refresh()
+  }
+}
