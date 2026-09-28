@@ -11,6 +11,7 @@ let package = Package(
     products: [
         .library(name: "PathnodAttestation", targets: ["PathnodAttestation"]),
         .library(name: "PathnodDensityCore", targets: ["PathnodDensityCore"]),
+        .library(name: "PathnodChallengeCore", targets: ["PathnodChallengeCore"]),
     ],
     targets: [
         .target(name: "PathnodAttestation"),
@@ -18,12 +19,15 @@ let package = Package(
             name: "PathnodAttestationTests",
             dependencies: ["PathnodAttestation"]
         ),
-        // Foundation only: no CoreBluetooth, no UIKit, no SwiftUI, no third-party
-        // dependency. The DEV-08 app target owns every platform framework.
         .target(name: "PathnodDensityCore"),
         .testTarget(
             name: "PathnodDensityCoreTests",
             dependencies: ["PathnodDensityCore"]
+        ),
+        .target(name: "PathnodChallengeCore"),
+        .testTarget(
+            name: "PathnodChallengeCoreTests",
+            dependencies: ["PathnodChallengeCore"]
         ),
     ]
 )

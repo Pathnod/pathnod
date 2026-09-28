@@ -27,7 +27,7 @@ relays, and dishonest operators remain part of the threat model.
 ## Repository map
 
 ```text
-apps/ios/            Swift packages and the foreground BLE density-scan app
+apps/ios/            Swift packages, the density scanner, and the S1 challenge app
 apps/dashboard/      operator dashboard
 firmware/esp32/      BLE device firmware
 tools/device-sim/    device simulator
@@ -45,11 +45,12 @@ running system yet.
 - `packages/verifier` implements the development-only attestation verifier:
   envelope parsing, strict unpadded base64url decoding, and a constant-time
   proof comparison. It has no HTTP endpoint, storage, or real provider.
-- `apps/ios` holds a Swift package with two products — `PathnodAttestation`, the
+- `apps/ios` holds a Swift package with three products — `PathnodAttestation`, the
   attestation provider contract and its development-only stub, and
   `PathnodDensityCore`, the Foundation-only classification, accumulation and
-  export logic of the density study — plus `Pathnod.xcodeproj` and the
-  `PathnodDensityScan` app that uses them.
+  export logic of the density study, and `PathnodChallengeCore`, the DEV-10
+  challenge protocol and verification logic — plus `Pathnod.xcodeproj` with
+  separate `PathnodDensityScan` and `PathnodChallengeScan` app targets.
 - `PathnodDensityScan` is a measurement instrument for a two-hour field study,
   not the observer app: it counts BLE advertisers visible while it is open,
   never connects, never runs in the background, never asks for location, and
