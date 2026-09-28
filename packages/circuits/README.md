@@ -1,11 +1,11 @@
-# Pathnod Poseidon compatibility harness
+# Pathnod circuits
 
 This package verifies Pathnod's canonical BN254 Poseidon field contract across
 Circom 2.2.3, `circomlibjs` 0.1.7, and the host-only Rust adapter built on
 `light-poseidon` 0.4.0.
 
-The single source of expected values is
-`fixtures/poseidon/bn254-circom-v1.json`. Its inputs are public test data and
+The canonical Poseidon vectors are in `fixtures/poseidon/bn254-circom-v1.json`;
+the ID conversion vectors are in `fixtures/ids/bn254-id-field-v1.json`. Their inputs are public test data and
 must never be replaced with production observer secrets. Normal tests only
 read the fixture; they never regenerate it.
 
@@ -19,8 +19,66 @@ uses two 32-byte arrays filled with `0x01` and `0x02`. Those byte arrays encode
 large field elements, not the scalar values `1` and `2`. Both cases are kept in
 the fixture to make this serialization boundary explicit.
 
-This harness checks compatibility only. It is not an audit of Poseidon or of
-Pathnod's future observation circuit.
+The vector harness checks cross-language compatibility only. It is not an audit
+of Poseidon or of the observation circuit.
+
+## DEV-12 observation circuit
+
+`circuits/observation.circom` proves knowledge of an observer credential in a
+depth-20 Poseidon Merkle tree, and derives two domain-separated public values:
+
+- `c_obs = Poseidon(s_obs)` and `leaf = Poseidon(c_obs, class)`;
+- `nullifier = Poseidon(1, s_obs, protocol_id_f, device_id_f, epoch)`;
+- `pseudonym = Poseidon(2, s_obs, protocol_id_f)`.
+
+Each `merkle_index[i]` is constrained to 0 or 1: 0 places the current node on
+the left, 1 on the right. `class` is constrained to 1, 2, or 3 and must equal
+`class_pub`. The seven public inputs, in Circom's declared order, are `root`,
+`protocol_id_f`, `device_id_f`, `epoch`, `nullifier`, `pseudonym`, and
+`class_pub`. `s_obs`, `class`, `merkle_path[20]`, and `merkle_index[20]` are
+private. The witness contains no BLE measurements or device signatures; those
+are verified by the separate observation verifier.
+
+All inputs are BN254 field elements. The host must generate `s_obs` from 31
+cryptographically random bytes. The canonical protocol and device IDs are
+each exactly 32 raw bytes. Split each ID into bytes `[0..16]` and `[16..32]`,
+interpret both halves as unsigned big-endian 128-bit integers `high` and
+`low`, then calculate:
+
+```text
+protocol_id_f = Poseidon(3, high(protocol_id), low(protocol_id))
+device_id_f   = Poseidon(4, high(device_id), low(device_id))
+```
+
+The Poseidon parameters are the pinned Circom BN254 x^5 parameters used by
+the shared fixture. No byte reversal, string hashing, truncation, or modular
+reduction of the raw ID is allowed. The result is a canonical BN254 scalar,
+serialized as a 32-byte big-endian value when bytes are needed. Both domains
+are distinct from `nullifier` (1) and `pseudonym` (2). The TypeScript and Rust
+helpers and fixture tests implement this conversion; the observation circuit
+accepts the resulting public field elements rather than hashing raw bytes.
+
+The verifier must derive both fields again from the canonical raw IDs in the
+trusted transcript and compare them with the public inputs. The circuit alone
+proves consistency with the supplied fields, not their correspondence to
+external byte strings. The verifier must compare all seven public inputs with
+the trusted enrollment root and transcript; it must not accept prover-supplied
+values without that check.
+
+Compile with the pinned Circom 2.2.3 compiler and the existing `circomlib`
+dependency:
+
+```sh
+circom packages/circuits/circuits/observation.circom --r1cs --wasm --O2 \
+  -o /tmp -l packages/circuits/node_modules
+packages/circuits/node_modules/.bin/snarkjs r1cs info /tmp/observation.r1cs
+```
+
+On Circom 2.2.3 with `--O2`, the circuit has 5,891 constraints and seven public
+inputs. This exceeds the spec's approximately 2,000-constraint estimate, but
+fits the 2^14 powers-of-tau size planned for DEV-13. No proving key or trusted
+setup artifact is produced by DEV-12; generation and mobile/on-chain timing
+remain DEV-13–15 validation work.
 
 ## Test
 
