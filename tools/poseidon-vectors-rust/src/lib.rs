@@ -7,6 +7,23 @@ use num_bigint::BigUint;
 
 pub const FIELD_MODULUS: &str =
     "21888242871839275222246405745257275088548364400416034343698204186575808495617";
+pub const DOMAIN_PROTOCOL_ID: u8 = 3;
+pub const DOMAIN_DEVICE_ID: u8 = 4;
+
+fn derive_id_field(id: &[u8; 32], domain: u8) -> Result<[u8; 32], AdapterError> {
+    let high = BigUint::from_bytes_be(&id[..16]).to_str_radix(10);
+    let low = BigUint::from_bytes_be(&id[16..]).to_str_radix(10);
+    let (bytes, _) = hash_canonical_inputs(&[domain.to_string(), high, low], 3)?;
+    Ok(bytes)
+}
+
+pub fn derive_protocol_id_field(id: &[u8; 32]) -> Result<[u8; 32], AdapterError> {
+    derive_id_field(id, DOMAIN_PROTOCOL_ID)
+}
+
+pub fn derive_device_id_field(id: &[u8; 32]) -> Result<[u8; 32], AdapterError> {
+    derive_id_field(id, DOMAIN_DEVICE_ID)
+}
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum AdapterError {
