@@ -33,7 +33,7 @@ The simulator advertises the **provisional** service UUID `534F5645-4C00-0000-00
 
 The signature is Ed25519 over `SHA-256(DEV_MSG_V0)`, where `DEV_MSG_V0` is the ASCII domain literal `Pathnod/challenge/v0`, followed by the challenge's nonce, big-endian epoch, hint, big-endian timestamp, big-endian counter, and 32 zero evidence-hash bytes. The draft spec calls the domain literal “24 octets”, but the actual literal is **20 ASCII bytes**. This implementation follows the literal and tests its length; the annotation should be corrected in the spec before interoperability is finalized.
 
-Malformed challenge lengths and incomplete or overlapping write fragments are rejected as one ATT transaction. Valid fragments are assembled into one 44-byte challenge, and CoreBluetooth receives exactly one acknowledgement for the write callback. A new valid challenge invalidates the previous response for that central, and a delayed response is emitted only if it still corresponds to the latest challenge. Bluetooth resets also invalidate delayed responses; generation tokens are never reused within the process. `RESPONSE` notifications target the subscribed central; reads return that central's latest completed response.
+Malformed challenge lengths and incomplete or overlapping write fragments are rejected as one ATT transaction. Valid fragments are assembled into one 44-byte challenge, and CoreBluetooth receives exactly one acknowledgement for the write callback. A new valid challenge invalidates the previous response for that central, and a delayed response is emitted only if it still corresponds to the latest challenge. Bluetooth resets also invalidate delayed responses; generation tokens are never reused within the process. `RESPONSE` notifications target the subscribed central; reads return that central's latest completed response. If the central's `maximumUpdateValueLength` is below the 78-byte response length, the notification carries only that many initial bytes. The full response remains available through a `RESPONSE` read; the central must read it before verification and must not treat the truncated notification as a complete response or a comparable notification RTT.
 
 ## macOS advertising limitation
 
@@ -44,7 +44,7 @@ Malformed challenge lengths and incomplete or overlapping write fragments are re
 1. Scan for the provisional service UUID, connect and discover `INFO`, `CHALLENGE` and `RESPONSE`.
 2. Read `INFO`; extract the 32-byte Ed25519 public key at offsets 2–33.
 3. Subscribe to `RESPONSE`, then write exactly 44 bytes to `CHALLENGE` with response.
-4. On notification, parse the 78-byte response, rebuild `DEV_MSG_V0`, SHA-256 it, and verify the signature using the `INFO` public key.
+4. On notification, parse the 78-byte response. If the notification is shorter, read the full `RESPONSE` characteristic instead and mark that RTT as a read fallback. Rebuild `DEV_MSG_V0`, SHA-256 it, and verify the signature using the `INFO` public key.
 5. Repeat with at least two delays, for example 0 and 150 ms, and record measured RTTs. The configured delay is not a physical distance measurement.
 
-Unit tests cover canonical encoding, malformed lengths, signing/verification, response/challenge mismatch, and generation invalidation across Bluetooth resets. The macOS radio, Bluetooth permission, notification delivery and RTT behavior require a real BLE central to validate.
+Unit tests cover canonical encoding, malformed lengths, signing/verification, response/challenge mismatch, generation invalidation across Bluetooth resets, and notification sizing. The macOS radio, Bluetooth permission, read fallback delivery and RTT behavior require a real BLE central to validate.

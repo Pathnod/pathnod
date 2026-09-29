@@ -117,4 +117,19 @@ final class DeviceProtocolTests: XCTestCase {
         gate.invalidate(central)
         XCTAssertFalse(gate.isCurrent(newToken, for: central))
     }
+
+    func testShortNotificationRequiresFullResponseRead() {
+        let fullResponse = Data((0..<DeviceProtocolV0.responseHeaderLength).map(UInt8.init))
+        let short = ResponseNotification(response: fullResponse, maximumUpdateValueLength: 20)
+        XCTAssertEqual(short.value, fullResponse.prefix(20))
+        XCTAssertTrue(short.requiresRead)
+
+        let almostFull = ResponseNotification(response: fullResponse, maximumUpdateValueLength: 77)
+        XCTAssertEqual(almostFull.value.count, 77)
+        XCTAssertTrue(almostFull.requiresRead)
+
+        let full = ResponseNotification(response: fullResponse, maximumUpdateValueLength: 78)
+        XCTAssertEqual(full.value, fullResponse)
+        XCTAssertFalse(full.requiresRead)
+    }
 }

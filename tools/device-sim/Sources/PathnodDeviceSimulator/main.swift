@@ -217,8 +217,18 @@ private final class DevicePeripheral: NSObject, @preconcurrency CBPeripheralMana
     private func flushNotification(for central: CBCentral) {
         let id = central.identifier
         guard let response = queuedNotifications[id] else { return }
-        if manager.updateValue(response, for: responseCharacteristic, onSubscribedCentrals: [central]) {
+        let notification = ResponseNotification(
+            response: response, maximumUpdateValueLength: central.maximumUpdateValueLength
+        )
+        guard !notification.value.isEmpty else {
+            simLog("Central cannot receive a RESPONSE notification; full response remains readable")
+            return
+        }
+        if manager.updateValue(notification.value, for: responseCharacteristic, onSubscribedCentrals: [central]) {
             queuedNotifications.removeValue(forKey: id)
+            if notification.requiresRead {
+                simLog("RESPONSE notification is shorter than the full response; central must read RESPONSE")
+            }
         }
     }
 
