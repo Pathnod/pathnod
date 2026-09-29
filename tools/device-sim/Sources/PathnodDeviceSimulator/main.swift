@@ -37,7 +37,7 @@ private final class DevicePeripheral: NSObject, @preconcurrency CBPeripheralMana
     private var challengeCharacteristic: CBMutableCharacteristic!
     private var responseCharacteristic: CBMutableCharacteristic!
     private var counter: UInt32 = 0
-    private var generationByCentral: [UUID: UInt64] = [:]
+    private var responseGenerations = ResponseGenerationGate()
     private var responseByCentral: [UUID: Data] = [:]
     private var queuedNotifications: [UUID: Data] = [:]
 
@@ -78,13 +78,14 @@ private final class DevicePeripheral: NSObject, @preconcurrency CBPeripheralMana
         infoCharacteristic = nil
         challengeCharacteristic = nil
         responseCharacteristic = nil
-        generationByCentral.removeAll()
+        responseGenerations.invalidateAll()
         responseByCentral.removeAll()
         queuedNotifications.removeAll()
     }
 
     private func publishService() {
         manager.removeAllServices()
+        responseGenerations.invalidateAll()
         responseByCentral.removeAll()
         queuedNotifications.removeAll()
         do {
@@ -136,7 +137,7 @@ private final class DevicePeripheral: NSObject, @preconcurrency CBPeripheralMana
 
     func peripheralManager(_ peripheral: CBPeripheralManager, central: CBCentral, didUnsubscribeFrom characteristic: CBCharacteristic) {
         let id = central.identifier
-        generationByCentral[id, default: 0] &+= 1
+        responseGenerations.invalidate(id)
         responseByCentral.removeValue(forKey: id)
         queuedNotifications.removeValue(forKey: id)
         simLog("Central unsubscribed; pending response cleared")
@@ -181,8 +182,7 @@ private final class DevicePeripheral: NSObject, @preconcurrency CBPeripheralMana
         }
 
         let id = first.central.identifier
-        generationByCentral[id, default: 0] &+= 1
-        let generation = generationByCentral[id]!
+        let generation = responseGenerations.beginChallenge(for: id)
         responseByCentral.removeValue(forKey: id)
         queuedNotifications.removeValue(forKey: id)
         peripheral.respond(to: first, withResult: .success)
@@ -194,7 +194,7 @@ private final class DevicePeripheral: NSObject, @preconcurrency CBPeripheralMana
 
     private func emitResponse(for challenge: DeviceProtocolV0.Challenge, central: CBCentral, generation: UInt64) {
         let id = central.identifier
-        guard generationByCentral[id] == generation else { return }
+        guard responseGenerations.isCurrent(generation, for: id) else { return }
         do {
             // The development simulator has no trusted clock or persistent monotone counter.
             let timestamp = UInt64(Date().timeIntervalSince1970)

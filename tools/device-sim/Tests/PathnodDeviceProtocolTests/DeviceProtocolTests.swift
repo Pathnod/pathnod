@@ -103,4 +103,18 @@ final class DeviceProtocolTests: XCTestCase {
         XCTAssertEqual(info.subdata(in: 2..<34), key)
         XCTAssertEqual(info.suffix(36), Data(repeating: 0, count: 36))
     }
+
+    func testDelayedResponseCannotSurviveBluetoothReset() {
+        let central = UUID()
+        var gate = ResponseGenerationGate()
+        let oldToken = gate.beginChallenge(for: central)
+        gate.invalidateAll()
+        let newToken = gate.beginChallenge(for: central)
+
+        XCTAssertNotEqual(oldToken, newToken)
+        XCTAssertFalse(gate.isCurrent(oldToken, for: central))
+        XCTAssertTrue(gate.isCurrent(newToken, for: central))
+        gate.invalidate(central)
+        XCTAssertFalse(gate.isCurrent(newToken, for: central))
+    }
 }
