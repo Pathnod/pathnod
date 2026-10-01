@@ -9,7 +9,9 @@ strictDepBuilds: true
 trustPolicy: no-downgrade
 allowBuilds:
   blake-hash: true
+  bufferutil: false
   esbuild: true
+  utf-8-validate: false
 overrides:
   underscore: 1.13.8
   ws: 8.21.0
