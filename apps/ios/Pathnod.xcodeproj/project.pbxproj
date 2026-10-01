@@ -7,6 +7,8 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		D08000000000000000000062 /* PathnodDensityCore in Frameworks */ = {isa = PBXBuildFile; productRef = D08000000000000000000061 /* PathnodDensityCore */; };
+		D08000000000000000000064 /* PathnodDensityCore in Frameworks */ = {isa = PBXBuildFile; productRef = D08000000000000000000063 /* PathnodDensityCore */; };
 		D08000000000000000000200 /* PathnodDensityScanApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = D08000000000000000000100 /* PathnodDensityScanApp.swift */; };
 		D08000000000000000000201 /* DensityScanView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D08000000000000000000101 /* DensityScanView.swift */; };
 		D08000000000000000000202 /* BLEScanController.swift in Sources */ = {isa = PBXBuildFile; fileRef = D08000000000000000000102 /* BLEScanController.swift */; };
@@ -14,8 +16,12 @@
 		D08000000000000000000204 /* ExportDocument.swift in Sources */ = {isa = PBXBuildFile; fileRef = D08000000000000000000104 /* ExportDocument.swift */; };
 		D08000000000000000000205 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = D08000000000000000000105 /* Assets.xcassets */; };
 		D08000000000000000000210 /* DensityScanAppTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D08000000000000000000110 /* DensityScanAppTests.swift */; };
-		D08000000000000000000062 /* PathnodDensityCore in Frameworks */ = {isa = PBXBuildFile; productRef = D08000000000000000000061 /* PathnodDensityCore */; };
-		D08000000000000000000064 /* PathnodDensityCore in Frameworks */ = {isa = PBXBuildFile; productRef = D08000000000000000000063 /* PathnodDensityCore */; };
+		D10000000000000000000062 /* PathnodChallengeCore in Frameworks */ = {isa = PBXBuildFile; productRef = D10000000000000000000061 /* PathnodChallengeCore */; };
+		D10000000000000000000064 /* PathnodChallengeCore in Frameworks */ = {isa = PBXBuildFile; productRef = D10000000000000000000063 /* PathnodChallengeCore */; };
+		D10000000000000000000200 /* PathnodChallengeScanApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = D10000000000000000000100 /* PathnodChallengeScanApp.swift */; };
+		D10000000000000000000201 /* ChallengeScanView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D10000000000000000000101 /* ChallengeScanView.swift */; };
+		D10000000000000000000202 /* ChallengeBLEController.swift in Sources */ = {isa = PBXBuildFile; fileRef = D10000000000000000000102 /* ChallengeBLEController.swift */; };
+		D10000000000000000000210 /* ChallengeScanAppTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D10000000000000000000110 /* ChallengeScanAppTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -25,6 +31,13 @@
 			proxyType = 1;
 			remoteGlobalIDString = D08000000000000000000010;
 			remoteInfo = PathnodDensityScan;
+		};
+		D10000000000000000000071 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = D08000000000000000000001 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = D10000000000000000000010;
+			remoteInfo = PathnodChallengeScan;
 		};
 /* End PBXContainerItemProxy section */
 
@@ -38,6 +51,12 @@
 		D08000000000000000000104 /* ExportDocument.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExportDocument.swift; sourceTree = "<group>"; };
 		D08000000000000000000105 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		D08000000000000000000110 /* DensityScanAppTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DensityScanAppTests.swift; sourceTree = "<group>"; };
+		D10000000000000000000020 /* PathnodChallengeScan.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = PathnodChallengeScan.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		D10000000000000000000021 /* PathnodChallengeScanTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = PathnodChallengeScanTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		D10000000000000000000100 /* PathnodChallengeScanApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PathnodChallengeScanApp.swift; sourceTree = "<group>"; };
+		D10000000000000000000101 /* ChallengeScanView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChallengeScanView.swift; sourceTree = "<group>"; };
+		D10000000000000000000102 /* ChallengeBLEController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChallengeBLEController.swift; sourceTree = "<group>"; };
+		D10000000000000000000110 /* ChallengeScanAppTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChallengeScanAppTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -57,6 +76,22 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		D10000000000000000000031 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				D10000000000000000000062 /* PathnodChallengeCore in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		D10000000000000000000034 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				D10000000000000000000064 /* PathnodChallengeCore in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -73,6 +108,8 @@
 			children = (
 				D08000000000000000000020 /* PathnodDensityScan.app */,
 				D08000000000000000000021 /* PathnodDensityScanTests.xctest */,
+				D10000000000000000000020 /* PathnodChallengeScan.app */,
+				D10000000000000000000021 /* PathnodChallengeScanTests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -82,6 +119,8 @@
 			children = (
 				D08000000000000000000005 /* DensityScan */,
 				D08000000000000000000006 /* DensityScanTests */,
+				D10000000000000000000005 /* ChallengeScan */,
+				D10000000000000000000006 /* ChallengeScanTests */,
 			);
 			path = App;
 			sourceTree = "<group>";
@@ -105,6 +144,24 @@
 				D08000000000000000000110 /* DensityScanAppTests.swift */,
 			);
 			path = DensityScanTests;
+			sourceTree = "<group>";
+		};
+		D10000000000000000000005 /* ChallengeScan */ = {
+			isa = PBXGroup;
+			children = (
+				D10000000000000000000100 /* PathnodChallengeScanApp.swift */,
+				D10000000000000000000101 /* ChallengeScanView.swift */,
+				D10000000000000000000102 /* ChallengeBLEController.swift */,
+			);
+			path = ChallengeScan;
+			sourceTree = "<group>";
+		};
+		D10000000000000000000006 /* ChallengeScanTests */ = {
+			isa = PBXGroup;
+			children = (
+				D10000000000000000000110 /* ChallengeScanAppTests.swift */,
+			);
+			path = ChallengeScanTests;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -150,6 +207,45 @@
 			productReference = D08000000000000000000021 /* PathnodDensityScanTests.xctest */;
 			productType = "com.apple.product-type.bundle.unit-test";
 		};
+		D10000000000000000000010 /* PathnodChallengeScan */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = D10000000000000000000041 /* Build configuration list for PBXNativeTarget "PathnodChallengeScan" */;
+			buildPhases = (
+				D10000000000000000000030 /* Sources */,
+				D10000000000000000000031 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = PathnodChallengeScan;
+			packageProductDependencies = (
+				D10000000000000000000061 /* PathnodChallengeCore */,
+			);
+			productName = PathnodChallengeScan;
+			productReference = D10000000000000000000020 /* PathnodChallengeScan.app */;
+			productType = "com.apple.product-type.application";
+		};
+		D10000000000000000000011 /* PathnodChallengeScanTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = D10000000000000000000042 /* Build configuration list for PBXNativeTarget "PathnodChallengeScanTests" */;
+			buildPhases = (
+				D10000000000000000000033 /* Sources */,
+				D10000000000000000000034 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				D10000000000000000000070 /* PBXTargetDependency */,
+			);
+			name = PathnodChallengeScanTests;
+			packageProductDependencies = (
+				D10000000000000000000063 /* PathnodChallengeCore */,
+			);
+			productName = PathnodChallengeScanTests;
+			productReference = D10000000000000000000021 /* PathnodChallengeScanTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -166,6 +262,13 @@
 					D08000000000000000000011 = {
 						CreatedOnToolsVersion = 16.0;
 						TestTargetID = D08000000000000000000010;
+					};
+					D10000000000000000000010 = {
+						CreatedOnToolsVersion = 16.0;
+					};
+					D10000000000000000000011 = {
+						CreatedOnToolsVersion = 16.0;
+						TestTargetID = D10000000000000000000010;
 					};
 				};
 			};
@@ -187,6 +290,8 @@
 			targets = (
 				D08000000000000000000010 /* PathnodDensityScan */,
 				D08000000000000000000011 /* PathnodDensityScanTests */,
+				D10000000000000000000010 /* PathnodChallengeScan */,
+				D10000000000000000000011 /* PathnodChallengeScanTests */,
 			);
 		};
 /* End PBXProject section */
@@ -223,6 +328,24 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		D10000000000000000000030 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				D10000000000000000000200 /* PathnodChallengeScanApp.swift in Sources */,
+				D10000000000000000000201 /* ChallengeScanView.swift in Sources */,
+				D10000000000000000000202 /* ChallengeBLEController.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		D10000000000000000000033 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				D10000000000000000000210 /* ChallengeScanAppTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
@@ -230,6 +353,11 @@
 			isa = PBXTargetDependency;
 			target = D08000000000000000000010 /* PathnodDensityScan */;
 			targetProxy = D08000000000000000000071 /* PBXContainerItemProxy */;
+		};
+		D10000000000000000000070 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = D10000000000000000000010 /* PathnodChallengeScan */;
+			targetProxy = D10000000000000000000071 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -431,6 +559,76 @@
 			};
 			name = Release;
 		};
+		D10000000000000000000052 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = "Pathnod S1";
+				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "Pathnod uses Bluetooth while this app is open to test three signed challenges with the development device simulator.";
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = xyz.pathnod.challengescan;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		D10000000000000000000053 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = "Pathnod S1";
+				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "Pathnod uses Bluetooth while this app is open to test three signed challenges with the development device simulator.";
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = xyz.pathnod.challengescan;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		D10000000000000000000054 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = xyz.pathnod.challengescan.tests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/PathnodChallengeScan.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/PathnodChallengeScan";
+			};
+			name = Debug;
+		};
+		D10000000000000000000055 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = xyz.pathnod.challengescan.tests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/PathnodChallengeScan.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/PathnodChallengeScan";
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -461,6 +659,24 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
+		D10000000000000000000041 /* Build configuration list for PBXNativeTarget "PathnodChallengeScan" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				D10000000000000000000052 /* Debug */,
+				D10000000000000000000053 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		D10000000000000000000042 /* Build configuration list for PBXNativeTarget "PathnodChallengeScanTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				D10000000000000000000054 /* Debug */,
+				D10000000000000000000055 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 /* End XCConfigurationList section */
 
 /* Begin XCLocalSwiftPackageReference section */
@@ -478,6 +694,14 @@
 		D08000000000000000000063 /* PathnodDensityCore */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = PathnodDensityCore;
+		};
+		D10000000000000000000061 /* PathnodChallengeCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = PathnodChallengeCore;
+		};
+		D10000000000000000000063 /* PathnodChallengeCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = PathnodChallengeCore;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};
