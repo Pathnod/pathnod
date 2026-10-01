@@ -125,10 +125,12 @@ On 2026-10-01, with the pinned toolchain and a freshly generated DEV-13 setup:
   verification (`unsupported BPF instruction`), despite working locally.
   Runtime meter logging resolved this instrumentation issue without changing
   the pinned toolchain or weakening the verifier/negative-test assertions.
-- JavaScript audit: no high/critical advisory; two moderate transitive
-  advisories under the test-only web3 RPC client (`jayson` → `uuid` and
-  `stream-json`), plus the existing low-severity `elliptic` advisory. This
-  development harness is not a publicly exposed RPC service.
+- JavaScript audit: no moderate/high/critical advisory; the existing
+  low-severity `elliptic` advisory remains. A scoped `@solana/web3.js>jayson`
+  override selects `jayson` 5.0.0, removing the vulnerable `stream-json` and
+  `uuid` dependencies. A mocked RPC regression test covers balance,
+  blockhash, transaction submission, and signature-status calls without
+  sending a transaction to a network. The CI severity threshold is unchanged.
 
 Reports/artifacts remain outside Git. The final devnet report supplies the
 public signature and measured CU required by DEV-15; the disposable setup
