@@ -119,10 +119,12 @@ packages/circuits/node_modules/.bin/snarkjs groth16 verify \
 The first verification prints `OK!`; the second reports `Invalid proof`.
 
 **These setup artifacts are for local development only.** A single-machine
-ceremony does not establish a production trust assumption. Never deploy its
-proving or verification key, and never commit the generated artifacts. DEV-14
-will measure iOS proving; DEV-15 will test on-chain verification. The command
-does not test either integration.
+ceremony does not establish a production trust assumption. Never use its keys
+on mainnet or for real observations, and never commit generated artifacts.
+DEV-15 permits a disposable devnet compatibility spike only; see
+[the Solana verifier guide](../../docs/dev15-solana-groth16.md) for conversion,
+local/devnet commands, negative tests and compute-unit reporting. DEV-14 will
+measure iOS proving. The DEV-13 command does not test either integration.
 
 ## Test
 
