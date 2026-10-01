@@ -6,7 +6,8 @@
   "license": "Apache-2.0",
   "type": "module",
   "scripts": {
-    "test": "tsc --noEmit && tsx --test test/**/*.test.ts"
+    "test": "tsc --noEmit && tsx --test test/**/*.test.ts",
+    "dev13:prove": "tsx scripts/dev13-groth16.ts"
   },
   "dependencies": {
     "circomlib": "2.0.5",
