@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "algorithm": "poseidon",
+  "parameterSet": "circom-bn254-x5",
+  "rawIdEncoding": "32-byte-big-endian",
+  "limbEncoding": "two-unsigned-128-bit-big-endian",
+  "outputEncoding": "canonical-bn254-32-byte-big-endian",
+  "publicTestData": true,
+  "vectors": [
+    {
+      "name": "protocol-zero",
+      "kind": "protocol",
+      "rawIdHex": "0x0000000000000000000000000000000000000000000000000000000000000000",
+      "domain": "3",
+      "high128": "0",
+      "low128": "0",
+      "expected": "10421825637439628824081370409036765017174374174061117515899412920044738899655",
+      "expectedHex": "0x170a8b558ecde634b242c7eb6486632e287720e5768e56ec2342c6dcd858eec7"
+    },
+    {
+      "name": "device-zero",
+      "kind": "device",
+      "rawIdHex": "0x0000000000000000000000000000000000000000000000000000000000000000",
+      "domain": "4",
+      "high128": "0",
+      "low128": "0",
+      "expected": "17414254815678759603263963225447509565793734126112918216005543896799388599893",
+      "expectedHex": "0x26801e72b83394202838edbe623ffd7ebbb83131ea60e8792105eb8453fb8655"
+    },
+    {
+      "name": "protocol-sequential",
+      "kind": "protocol",
+      "rawIdHex": "0x000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+      "domain": "3",
+      "high128": "5233100606242806050955395731361295",
+      "low128": "21356283574076891493948969979685445151",
+      "expected": "12865183767261682714732916954062515286160832202731698820533232072398763193147",
+      "expectedHex": "0x1c716f9b97aebd07beeee9799aac2e87dc989c111c4ef5beaa8680a08827f33b"
+    },
+    {
+      "name": "device-all-ff",
+      "kind": "device",
+      "rawIdHex": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "domain": "4",
+      "high128": "340282366920938463463374607431768211455",
+      "low128": "340282366920938463463374607431768211455",
+      "expected": "8281416293562356922438067204069558460101868180953908206445999841104692175581",
+      "expectedHex": "0x124f1d92865c41af3bd6054f6fd597d21916d30a26be3fb86d790d32c696e2dd"
+    }
+  ]
+}
