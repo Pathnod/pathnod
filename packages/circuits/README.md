@@ -121,10 +121,12 @@ The first verification prints `OK!`; the second reports `Invalid proof`.
 **These setup artifacts are for local development only.** A single-machine
 ceremony does not establish a production trust assumption. Never use its keys
 on mainnet or for real observations, and never commit generated artifacts.
+The [DEV-14 iOS harness](../../apps/ios/MoproObservation/README.md) measures
+device proving with these local artifacts.
 DEV-15 permits a disposable devnet compatibility spike only; see
 [the Solana verifier guide](../../docs/dev15-solana-groth16.md) for conversion,
-local/devnet commands, negative tests and compute-unit reporting. DEV-14 will
-measure iOS proving. The DEV-13 command does not test either integration.
+local/devnet commands, negative tests and compute-unit reporting.
+The DEV-13 command alone does not test either integration.
 
 ## Test
 
