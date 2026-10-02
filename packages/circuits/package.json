@@ -8,7 +8,8 @@
   "scripts": {
     "test": "tsc --noEmit && tsx --test test/**/*.test.ts",
     "dev13:prove": "tsx scripts/dev13-groth16.ts",
-    "dev15:verify": "tsx scripts/dev15-solana.ts"
+    "dev15:verify": "tsx scripts/dev15-solana.ts",
+    "dev16:submit": "tsx scripts/dev16-submit.ts"
   },
   "dependencies": {
     "@solana/web3.js": "1.98.4",

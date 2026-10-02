@@ -3,7 +3,7 @@ name = "pathnod"
 version = "0.1.0"
 edition = "2021"
 license = "Apache-2.0"
-description = "Minimal Pathnod Solana program; exists to validate the pinned toolchain"
+description = "Development-only Groth16 observation program"
 
 [lib]
 crate-type = ["cdylib", "lib"]
@@ -18,6 +18,6 @@ no-log-ix-name = []
 idl-build = ["anchor-lang/idl-build"]
 
 [dependencies]
-anchor-lang = "=1.2.0"
+anchor-lang = { version = "=1.2.0", features = ["init-if-needed"] }
 groth16-solana = "=0.2.0"
 solana-define-syscall = "=5.2.0"

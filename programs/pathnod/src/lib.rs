@@ -1,7 +1,7 @@
 //! Pathnod on-chain program.
 //!
-//! DEV-15 is a development-only Groth16 compatibility/CU spike, NOT an
-//! observation acceptance endpoint. Its caller-selected keys confer no trust.
+//! DEV-15 and DEV-16 are development-only Groth16 and nullifier spikes.
+//! Caller-selected keys confer no protocol trust.
 
 use anchor_lang::prelude::*;
 use groth16_solana::groth16::{Groth16Verifier, Groth16Verifyingkey};
@@ -39,23 +39,43 @@ pub mod pathnod {
         proof_c: [u8; 64],
         public_inputs: [[u8; 32]; 7],
     ) -> Result<()> {
-        let key = &ctx.accounts.config.key;
-        let vk = Groth16Verifyingkey {
-            // The crate's key metadata includes the constant IC[0] term.
-            nr_pubinputs: 8,
-            vk_alpha_g1: key.alpha,
-            vk_beta_g2: key.beta,
-            vk_gamme_g2: key.gamma,
-            vk_delta_g2: key.delta,
-            vk_ic: &key.ic,
-        };
-        log_compute_units();
-        let mut verifier = Groth16Verifier::new(&proof_a, &proof_b, &proof_c, &public_inputs, &vk)
-            .map_err(|_| error!(SpikeError::InvalidProof))?;
-        verifier
-            .verify()
-            .map_err(|_| error!(SpikeError::InvalidProof))?;
-        log_compute_units();
+        verify_proof(
+            &ctx.accounts.config.key,
+            &proof_a,
+            &proof_b,
+            &proof_c,
+            &public_inputs,
+        )?;
+        Ok(())
+    }
+
+    /// DEV-16: prove once per nullifier with a caller-selected test key.
+    pub fn submit_observation(
+        ctx: Context<SubmitObservation>,
+        public_inputs: [[u8; 32]; 7],
+        proof_a: [u8; 64],
+        proof_b: [u8; 128],
+        proof_c: [u8; 64],
+    ) -> Result<()> {
+        require!(
+            !ctx.accounts.commitment.accepted,
+            SpikeError::NullifierAlreadyUsed
+        );
+        verify_proof(
+            &ctx.accounts.config.key,
+            &proof_a,
+            &proof_b,
+            &proof_c,
+            &public_inputs,
+        )?;
+
+        let commitment = &mut ctx.accounts.commitment;
+        commitment.accepted = true;
+        commitment.nullifier = public_inputs[4];
+        commitment.public_inputs = public_inputs;
+        commitment.verifier_config = ctx.accounts.config.key();
+        commitment.submitter = ctx.accounts.submitter.key();
+        commitment.accepted_slot = Clock::get()?.slot;
         Ok(())
     }
 }
@@ -78,6 +98,20 @@ pub struct Groth16SpikeConfig {
     pub key: VerificationKeyData,
 }
 
+#[account]
+pub struct ObservationCommitment {
+    pub accepted: bool,
+    pub nullifier: [u8; 32],
+    pub public_inputs: [[u8; 32]; 7],
+    pub verifier_config: Pubkey,
+    pub submitter: Pubkey,
+    pub accepted_slot: u64,
+}
+
+impl ObservationCommitment {
+    pub const SPACE: usize = 8 + 1 + 32 + 7 * 32 + 32 + 32 + 8;
+}
+
 #[derive(Accounts)]
 pub struct InitializeGroth16Spike<'info> {
     #[account(init, payer = authority, space = 8 + 32 + 960,
@@ -94,10 +128,50 @@ pub struct VerifyGroth16Spike<'info> {
     pub config: Account<'info, Groth16SpikeConfig>,
 }
 
+#[derive(Accounts)]
+#[instruction(public_inputs: [[u8; 32]; 7])]
+pub struct SubmitObservation<'info> {
+    #[account(seeds = [b"dev15-vk", config.authority.as_ref()], bump)]
+    pub config: Account<'info, Groth16SpikeConfig>,
+    #[account(init_if_needed, payer = submitter, space = ObservationCommitment::SPACE,
+        seeds = [b"obs", public_inputs[4].as_ref()], bump)]
+    pub commitment: Account<'info, ObservationCommitment>,
+    #[account(mut)]
+    pub submitter: Signer<'info>,
+    pub system_program: Program<'info, System>,
+}
+
 #[error_code]
 pub enum SpikeError {
     #[msg("Invalid Groth16 proof, key or non-canonical public input")]
     InvalidProof,
+    #[msg("E_NULLIFIER: observation nullifier already used")]
+    NullifierAlreadyUsed,
+}
+
+fn verify_proof(
+    key: &VerificationKeyData,
+    proof_a: &[u8; 64],
+    proof_b: &[u8; 128],
+    proof_c: &[u8; 64],
+    public_inputs: &[[u8; 32]; 7],
+) -> Result<()> {
+    let vk = Groth16Verifyingkey {
+        nr_pubinputs: 8,
+        vk_alpha_g1: key.alpha,
+        vk_beta_g2: key.beta,
+        vk_gamme_g2: key.gamma,
+        vk_delta_g2: key.delta,
+        vk_ic: &key.ic,
+    };
+    log_compute_units();
+    let mut verifier = Groth16Verifier::new(proof_a, proof_b, proof_c, public_inputs, &vk)
+        .map_err(|_| error!(SpikeError::InvalidProof))?;
+    verifier
+        .verify()
+        .map_err(|_| error!(SpikeError::InvalidProof))?;
+    log_compute_units();
+    Ok(())
 }
 
 fn log_compute_units() {
