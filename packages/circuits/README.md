@@ -120,9 +120,10 @@ The first verification prints `OK!`; the second reports `Invalid proof`.
 
 **These setup artifacts are for local development only.** A single-machine
 ceremony does not establish a production trust assumption. Never deploy its
-proving or verification key, and never commit the generated artifacts. DEV-14
-will measure iOS proving; DEV-15 will test on-chain verification. The command
-does not test either integration.
+proving or verification key, and never commit the generated artifacts. The
+[DEV-14 iOS harness](../../apps/ios/MoproObservation/README.md) measures device
+proving with these local artifacts. DEV-15 will test on-chain verification. This
+command alone does not test either integration.
 
 ## Test
 

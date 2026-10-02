@@ -1,0 +1,40 @@
+name: PathnodObservation
+options:
+  bundleIdPrefix: xyz.pathnod
+  deploymentTarget:
+    iOS: "18.0"
+targets:
+  PathnodObservation:
+    type: application
+    platform: iOS
+    sources:
+      - path: App
+      - path: MoproiOSBindings/mopro.swift
+      - path: LocalCircuits/observation_final.zkey
+        buildPhase: resources
+      - path: LocalCircuits/mopro-input.json
+        buildPhase: resources
+      - path: LocalCircuits/public.json
+        buildPhase: resources
+    dependencies:
+      - framework: MoproiOSBindings/MoproBindings.xcframework
+        embed: false
+    settings:
+      base:
+        SWIFT_VERSION: "5.0"
+        PRODUCT_BUNDLE_IDENTIFIER: xyz.pathnod.observationdev
+        GENERATE_INFOPLIST_FILE: YES
+        TARGETED_DEVICE_FAMILY: "1"
+        OTHER_SWIFT_FLAGS: "-Xcc -fmodule-map-file=$(SRCROOT)/MoproiOSBindings/module/module.modulemap"
+  PathnodObservationUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: UITests
+    dependencies:
+      - target: PathnodObservation
+    settings:
+      base:
+        SWIFT_VERSION: "5.0"
+        GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_BUNDLE_IDENTIFIER: xyz.pathnod.observationdev.uitests
