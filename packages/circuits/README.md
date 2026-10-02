@@ -76,9 +76,53 @@ packages/circuits/node_modules/.bin/snarkjs r1cs info /tmp/observation.r1cs
 
 On Circom 2.2.3 with `--O2`, the circuit has 5,891 constraints and seven public
 inputs. This exceeds the spec's approximately 2,000-constraint estimate, but
-fits the 2^14 powers-of-tau size planned for DEV-13. No proving key or trusted
-setup artifact is produced by DEV-12; generation and mobile/on-chain timing
-remain DEV-13–15 validation work.
+fits the 2^14 powers-of-tau size used by the local Groth16 flow below. Mobile
+proving and on-chain verification remain DEV-14 and DEV-15 work.
+
+## DEV-13 local Groth16 proof
+
+With the pinned Node 24.21.0, installed workspace dependencies, and Circom
+2.2.3 on `PATH`, run from the repository root:
+
+```sh
+pnpm --filter @pathnod/circuits dev13:prove
+```
+
+The command creates a new temporary directory and prints its path. To choose
+the location, pass `--out /path/to/empty/directory`; the directory must exist
+and be outside this repository. The script compiles the observation circuit
+with `--O2`, checks its constraint count and seven public inputs, then performs
+a local BN254 powers-of-tau ceremony at power 14. It contributes and applies a
+beacon to phase 1, prepares phase 2, creates and contributes to the Groth16
+`.zkey`, applies a phase 2 beacon, verifies the transcripts, and exports
+`verification_key.json`.
+
+It then generates a proof from a fixed synthetic observer input, checks the
+public signals in this order: `root`, `protocol_id_f`, `device_id_f`, `epoch`,
+`nullifier`, `pseudonym`, `class_pub`, verifies the proof with `snarkjs`, and
+confirms that verification rejects the same proof with a changed root. The
+output directory contains the `.ptau`, `.zkey`, R1CS, WASM, input, proof,
+public signals, and verification key needed to inspect or repeat individual
+`snarkjs` commands. Setup contributions use fresh local randomness on every
+run, so the keys and proofs are not reproducible byte for byte.
+
+For example, after setting `dev13_dir` to the directory printed by the script:
+
+```sh
+packages/circuits/node_modules/.bin/snarkjs r1cs info "$dev13_dir/observation.r1cs"
+packages/circuits/node_modules/.bin/snarkjs groth16 verify \
+  "$dev13_dir/verification_key.json" "$dev13_dir/public.json" "$dev13_dir/proof.json"
+packages/circuits/node_modules/.bin/snarkjs groth16 verify \
+  "$dev13_dir/verification_key.json" "$dev13_dir/public-tampered.json" "$dev13_dir/proof.json"
+```
+
+The first verification prints `OK!`; the second reports `Invalid proof`.
+
+**These setup artifacts are for local development only.** A single-machine
+ceremony does not establish a production trust assumption. Never deploy its
+proving or verification key, and never commit the generated artifacts. DEV-14
+will measure iOS proving; DEV-15 will test on-chain verification. The command
+does not test either integration.
 
 ## Test
 
