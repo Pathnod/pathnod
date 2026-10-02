@@ -26,8 +26,12 @@ all seven public inputs. The generated proving key and input files stay local.
 
 ## Build and run on iPhone
 
-Install Xcode, XcodeGen, CMake, Rust, and the pinned Mopro CLI. The first
-`mopro build` also downloads and builds `w2c2`.
+Install Xcode, XcodeGen, CMake, Git, Rust, and the pinned Mopro CLI. The Rust
+build script downloads and builds `w2c2` at commit
+`9de3c2be5a4ed8ef5fdbd536e445120594fb8530`. This fixed revision is needed
+because `rust-witness` otherwise clones the moving default branch during a
+clean build. A network connection is required for the first build in each new
+Cargo target directory.
 
 ```sh
 cargo install mopro-cli --version 0.3.7 --locked
