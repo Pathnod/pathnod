@@ -7,9 +7,11 @@
   "type": "module",
   "scripts": {
     "test": "tsc --noEmit && tsx --test test/**/*.test.ts",
-    "dev13:prove": "tsx scripts/dev13-groth16.ts"
+    "dev13:prove": "tsx scripts/dev13-groth16.ts",
+    "dev15:verify": "tsx scripts/dev15-solana.ts"
   },
   "dependencies": {
+    "@solana/web3.js": "1.98.4",
     "circomlib": "2.0.5",
     "circomlibjs": "0.1.7",
     "snarkjs": "0.7.6"

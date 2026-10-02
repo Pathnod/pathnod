@@ -61,9 +61,11 @@ running system yet.
 - Both sides only implement the development stub, which carries no hardware
   assurance. See
   [ADR 0002](docs/decisions/0002-development-attestation.md).
-- The dashboard, firmware, simulator, and circuits are placeholders.
-- `programs/pathnod` is a minimal buildable Anchor scaffold with no registry,
-  proof verification, nullifier, reward, or payment logic.
+- The circuits implement a depth-20 observation circuit and a development-only
+  Groth16 setup/proof harness. See the [circuits README](packages/circuits/README.md).
+- `programs/pathnod` includes a DEV-15 Groth16 verification/CU spike with
+  caller-selected immutable test keys. It is not an observation acceptance API
+  and has no registry, nullifier uniqueness, reward, or payment logic.
 - The repository currently establishes component boundaries and a reproducible
   development toolchain.
 
@@ -90,6 +92,7 @@ artifacts, or build output.
 - [Toolchain and monorepo baseline](docs/decisions/0001-toolchain-and-monorepo.md)
 - [Development-only attestation stubs](docs/decisions/0002-development-attestation.md)
 - [Foreground BLE density scan](docs/decisions/0003-foreground-ble-density-scan.md)
+- [DEV-15 Solana Groth16 verification spike](docs/dev15-solana-groth16.md)
 
 ## Contributing
 
