@@ -1,12 +1,12 @@
-# ESP32 BLE identity baseline (DEV-20)
+# ESP32 BLE identity and challenge/response (DEV-20 / DEV-21)
 
 ESP-IDF **v5.5.1** (`fcae32885b0296b32044cb99ecbdc50d98dddb83`),
 NimBLE peripheral, ESP32-C3 / ESP32-S3, 4 MB flash assumed.
 The managed libsodium component is pinned in `main/idf_component.yml`.
 Confirm the board's chip, flash size and serial port before flashing.
 
-This implements discovery and persistent Ed25519 identity only. INFO is readable
-for identity inspection; CHALLENGE/RESPONSE and signatures are DEV-21, while
+This implements discovery, persistent Ed25519 identity and DEV-21 GATT signing.
+INFO is readable for identity inspection; CHALLENGE/RESPONSE are available, while
 nonce caching, rate limiting and a monotonic counter are DEV-22.
 No trusted clock, secure element, non-exportable signing key, or relay resistance
 is claimed. INFO capabilities are **zero**, even in the protected profile:
@@ -55,8 +55,10 @@ Subsequent boots derive the same public key from the persisted seed.
 `device_id = SHA-256(ASCII("Pathnod/device/v0") || public_key)` (32 bytes).
 The domain is 17 bytes, without a terminating NUL. The private key is not logged
 or exposed by GATT. Temporary seed and secret-key buffers are wiped after use.
-DEV-21 must preserve this identity when adding its internal signing API, without
-exposing arbitrary-message signing or a private-key export endpoint.
+The internal signing key stays in RAM after successful initialization, avoiding
+NVS reads/key derivation for each challenge; failed reinitialization clears it.
+Only canonical challenge signing is exposed, not arbitrary-message signing or
+a private-key export endpoint. All GATT callbacks run on the NimBLE host task.
 
 Malformed storage, initialization errors, failed writes and failed commits stop
 startup. There is deliberately **no automatic NVS erase or identity rotation**.
@@ -90,6 +92,60 @@ validated until it is measured on an iPhone.
 INFO UUID `…0002`, Read: `version(1)=0 || curve(1)=1 || public_key(32) ||
 capabilities(4)=0 || protocol_hint(32)=0`, total 70 bytes. A full characteristic
 read must return all 70 bytes; MTU 185 is preferred, long reads are available.
+
+## DEV-21 GATT contract
+
+- CHALLENGE UUID `…0003`: Write **with response**, exactly 44 bytes:
+  `nonce(32) || obs_epoch(4, big-endian) || obs_hint(8)`.
+- RESPONSE UUID `…0004`: Read / Notify, 78 bytes:
+  `signature(64) || dev_ts(8)=0 || dev_counter(4)=0 || evidence_len(2)=0`.
+- Signed payload: `Ed25519.sign(SHA-256(DEV_MSG_V0))`, not the raw message and
+  not Ed25519ph. `DEV_MSG_V0` is the **20 ASCII bytes** `Pathnod/challenge/v0`
+  (without NUL), followed by the entire 44-byte challenge, 8 zero timestamp
+  bytes, 4 zero counter bytes and a 32-byte zero evidence hash: **108 bytes**.
+  There is no clock/counter/evidence capability in this task.
+- Exactly one connection is supported. Response and subscription state are
+  cleared on connect/disconnect/host reset, including reused connection handles.
+  Reading before a successful challenge fails. Invalid challenge lengths clear
+  any previous response and are rejected; no partial challenge is signed.
+- At MTU >= 81 the notification carries the entire response (MTU 185 preferred).
+  At MTU 23 it carries a 20-byte prefix; the central must then **read the full
+  characteristic**, as the existing iOS read-fallback supports. ATT long writes
+  are assembled/offset-validated by NimBLE; do not send separate partial writes.
+  Without a notification subscription, the full response is still readable.
+  Notification enqueue failures return an ATT resource error; reading remains
+  possible, but the central must not treat the failed write as successful.
+- Serial logs measure signature processing plus notification enqueue in
+  microseconds and warn at >= 50,000 us. This is not end-to-end radio RTT or proof
+  of delivery. Timestamp/counter, replay caching and rate limits remain DEV-22;
+  repeated valid challenges are intentionally accepted in DEV-21.
+
+### Hardware acceptance — @kazai777
+
+1. Build/flash the correct development profile using the instructions above.
+   Read INFO and check that its public key is unchanged from DEV-20.
+2. Subscribe to RESPONSE, preferably negotiate MTU 185, then write a fresh
+   44-byte challenge to CHALLENGE **with response**. Capture the full 78-byte
+   response; timestamp, counter and evidence length must all be zero.
+3. Independently verify the public key (32 bytes from INFO), challenge and response:
+
+   ```sh
+   node firmware/esp32/tests/verify_response.mjs PUBLIC_KEY_HEX CHALLENGE_HEX RESPONSE_HEX
+   ```
+
+   Use hex without spaces. Alter a nonce/epoch/hint byte: verification must fail.
+4. Test MTU 23: use an ATT long write for the 44-byte challenge and a full read
+   after the short notification. Send lengths 0, 43 and 45: they must fail; the
+   old response must no longer be readable. Read before the first challenge,
+   then disconnect/reconnect: neither case may return a prior session's response.
+5. Send at least 100 fresh challenges. Record chip, SDK, CPU frequency, iPhone/iOS,
+   MTU, maximum processing time, notification delivery and central RTT separately.
+   Every firmware processing log must be **< 50,000 us** to satisfy DEV-21.
+   No real-board timing or BLE acceptance is claimed by the host tests.
+
+Task: [DEV-21](https://app.notion.com/p/3e2bc83eb4a280b8a991f1ededb30c46).
+Stack base: `feat/dev-20-esp32-ble-identity`; DEV-21 does not replace DEV-20's
+pending hardware discovery/persistence checks.
 
 ## Protected storage profile — operator review required
 
@@ -141,6 +197,11 @@ read/open/write/commit errors, protected-profile refusal on unencrypted hardware
 and exact advertising structures. They do not validate actual NVS power-loss
 recovery, BLE radio behavior or eFuse provisioning.
 
+DEV-21 adds a deterministic Node.js/OpenSSL interoperability signature vector,
+digest-vs-raw-message verification, mutations across every signed field, malformed
+challenge lengths, failed-init signing refusal and connection-state isolation.
+These tests use the real session/signing code, but not NimBLE or the BLE radio.
+
 ## iPhone acceptance test (required to close DEV-20)
 
 1. Flash the development profile to a confirmed C3/S3 board; open its monitor.
@@ -161,7 +222,7 @@ recovery, BLE radio behavior or eFuse provisioning.
 Task: [DEV-20](https://app.notion.com/p/3e2bc83eb4a280e39407fbf31511def2).
 Protocol: [Pathnod Spec §1, §2.1, §2.4, §2.6](https://app.notion.com/p/Pathnod-Spec-638bc83eb4a28246abb3019bf8afa88d).
 
-## Validation record (2026-10-03)
+## DEV-20 baseline validation record (2026-10-03)
 
 - Host development/protected tests pass with AppleClang, including AddressSanitizer
   and UndefinedBehaviorSanitizer runs.
@@ -176,3 +237,15 @@ Protocol: [Pathnod Spec §1, §2.1, §2.4, §2.6](https://app.notion.com/p/Pathn
 - No board was flashed, no eFuse was programmed, and no radio/protected-hardware
   acceptance test was performed. DEV-20 cannot be marked fully validated until
   the iPhone discovery and identity persistence tests above pass on real hardware.
+
+## DEV-21 validation record (2026-10-03)
+
+- Development/protected host tests pass, including AddressSanitizer and
+  UndefinedBehaviorSanitizer. The independent Node.js verifier accepts the
+  deterministic public test vector.
+- ESP-IDF v5.5.1 builds pass for C3 and S3, in both development and protected
+  profiles. Application sizes: C3 681,712 bytes; S3 662,704 bytes; protected C3
+  685,152 bytes; protected S3 665,872 bytes. The < 200 KB target remains unmet.
+- No board was flashed and no eFuse was programmed. Real BLE reads/writes,
+  notification delivery, MTU fallback and < 50 ms processing are **pending**
+  the hardware acceptance procedure above; DEV-21 is not fully validated yet.
