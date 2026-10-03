@@ -48,6 +48,8 @@ jobs:
           FIRMWARE_PROFILE: ${{ matrix.profile }}
         run: |
           set -euo pipefail
+          # The container user differs from the checkout owner. Trust only this checkout.
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
           . "$IDF_PATH/export.sh"
           test "$(git -C "$IDF_PATH" rev-parse HEAD)" = fcae32885b0296b32044cb99ecbdc50d98dddb83
           defaults=sdkconfig.defaults
