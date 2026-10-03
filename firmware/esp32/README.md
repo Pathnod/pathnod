@@ -1,15 +1,14 @@
-# ESP32 BLE identity and challenge/response (DEV-20 / DEV-21)
+# ESP32 BLE identity and hardened challenge/response (DEV-20 / DEV-21 / DEV-22)
 
 ESP-IDF **v5.5.1** (`fcae32885b0296b32044cb99ecbdc50d98dddb83`),
 NimBLE peripheral, ESP32-C3 / ESP32-S3, 4 MB flash assumed.
 The managed libsodium component is pinned in `main/idf_component.yml`.
 Confirm the board's chip, flash size and serial port before flashing.
 
-This implements discovery, persistent Ed25519 identity and DEV-21 GATT signing.
-INFO is readable for identity inspection; CHALLENGE/RESPONSE are available, while
-nonce caching, rate limiting and a monotonic counter are DEV-22.
+This implements discovery, persistent Ed25519 identity, GATT signing and DEV-22
+replay/rate protection with an NVS-backed monotonic counter.
 No trusted clock, secure element, non-exportable signing key, or relay resistance
-is claimed. INFO capabilities are **zero**, even in the protected profile:
+is claimed. INFO capabilities are **0x0000000a** (bits 1 and 3), in both profiles:
 flash/NVS encryption does not make a software Ed25519 key non-exportable.
 
 ## Build (development profile, no irreversible provisioning)
@@ -90,20 +89,20 @@ criterion. Do not claim background discovery or early prefix filtering has been
 validated until it is measured on an iPhone.
 
 INFO UUID `…0002`, Read: `version(1)=0 || curve(1)=1 || public_key(32) ||
-capabilities(4)=0 || protocol_hint(32)=0`, total 70 bytes. A full characteristic
+capabilities(4, big-endian)=0x0000000a || protocol_hint(32)=0`, total 70 bytes. A full characteristic
 read must return all 70 bytes; MTU 185 is preferred, long reads are available.
 
-## DEV-21 GATT contract
+## GATT contract (DEV-21 transport, DEV-22 counter/guards)
 
 - CHALLENGE UUID `…0003`: Write **with response**, exactly 44 bytes:
   `nonce(32) || obs_epoch(4, big-endian) || obs_hint(8)`.
 - RESPONSE UUID `…0004`: Read / Notify, 78 bytes:
-  `signature(64) || dev_ts(8)=0 || dev_counter(4)=0 || evidence_len(2)=0`.
+  `signature(64) || dev_ts(8)=0 || dev_counter(4, big-endian)>0 || evidence_len(2)=0`.
 - Signed payload: `Ed25519.sign(SHA-256(DEV_MSG_V0))`, not the raw message and
   not Ed25519ph. `DEV_MSG_V0` is the **20 ASCII bytes** `Pathnod/challenge/v0`
   (without NUL), followed by the entire 44-byte challenge, 8 zero timestamp
-  bytes, 4 zero counter bytes and a 32-byte zero evidence hash: **108 bytes**.
-  There is no clock/counter/evidence capability in this task.
+  bytes, the 4-byte big-endian response counter and a 32-byte zero evidence hash:
+  **108 bytes**. There is no clock or evidence capability.
 - Exactly one connection is supported. Response and subscription state are
   cleared on connect/disconnect/host reset, including reused connection handles.
   Reading before a successful challenge fails. Invalid challenge lengths clear
@@ -117,8 +116,7 @@ read must return all 70 bytes; MTU 185 is preferred, long reads are available.
   possible, but the central must not treat the failed write as successful.
 - Serial logs measure signature processing plus notification enqueue in
   microseconds and warn at >= 50,000 us. This is not end-to-end radio RTT or proof
-  of delivery. Timestamp/counter, replay caching and rate limits remain DEV-22;
-  repeated valid challenges are intentionally accepted in DEV-21.
+  of delivery. A fresh nonce and rate-limit-compliant challenge are required.
 
 ### Hardware acceptance — @kazai777
 
@@ -126,7 +124,8 @@ read must return all 70 bytes; MTU 185 is preferred, long reads are available.
    Read INFO and check that its public key is unchanged from DEV-20.
 2. Subscribe to RESPONSE, preferably negotiate MTU 185, then write a fresh
    44-byte challenge to CHALLENGE **with response**. Capture the full 78-byte
-   response; timestamp, counter and evidence length must all be zero.
+   response; timestamp/evidence length must be zero and counter nonzero.
+   Wait at least two seconds between challenges, measured from the preceding write.
 3. Independently verify the public key (32 bytes from INFO), challenge and response:
 
    ```sh
@@ -138,14 +137,102 @@ read must return all 70 bytes; MTU 185 is preferred, long reads are available.
    after the short notification. Send lengths 0, 43 and 45: they must fail; the
    old response must no longer be readable. Read before the first challenge,
    then disconnect/reconnect: neither case may return a prior session's response.
-5. Send at least 100 fresh challenges. Record chip, SDK, CPU frequency, iPhone/iOS,
+5. Send at least 100 fresh challenges spaced at least two seconds apart. Record chip, SDK, CPU frequency, iPhone/iOS,
    MTU, maximum processing time, notification delivery and central RTT separately.
    Every firmware processing log must be **< 50,000 us** to satisfy DEV-21.
-   No real-board timing or BLE acceptance is claimed by the host tests.
+  No real-board timing or BLE acceptance is claimed by the host tests.
 
 Task: [DEV-21](https://app.notion.com/p/3e2bc83eb4a280b8a991f1ededb30c46).
 Stack base: `feat/dev-20-esp32-ble-identity`; DEV-21 does not replace DEV-20's
 pending hardware discovery/persistence checks.
+
+## DEV-22 anti-abuse and counter contract
+
+### Replay and rate limits
+
+- A boot-scoped, bounded **300-entry LRU cache** stores exact 32-byte nonces,
+  admission time and last-use time. Expiry is exactly ten minutes after admission;
+  replay touches update LRU order but do not extend expiry. Epoch/hint changes do
+  not make a repeated nonce fresh.
+- Valid-length attempts are limited to **one per two seconds per connection** and
+  **30 per rolling 60 seconds globally**. Global quota and nonce cache survive
+  disconnect/reconnect and BLE host resets. Only the per-connection quota resets.
+  Replays and signing/persistence failures consume the attempt quota. Malformed
+  lengths are rejected before signing and consume no nonce/counter.
+- A nonce is reserved before signing. Every rejection clears the current session
+  response. No replay/rate rejection advances the counter or produces a signature.
+- At the legal maximum of 30/minute, at most 300 insertions remain live over ten
+  minutes, so the normal guarded path need not evict a live nonce. LRU behavior is
+  tested independently; a smaller cache would weaken the ten-minute guarantee.
+- Cache/global quota are **RAM-only** and reset on reboot. Counter persistence
+  prevents reuse of a previously emitted counter, not a nonce cache surviving
+  power loss. A repeated nonce after reboot can yield a new signature/counter;
+  old responses must still be rejected by verifier counter policy/nullifiers.
+- `esp_timer_get_time()` supplies monotonic boot-relative microseconds; it is not
+  a trusted Unix clock. Negative/backward time is rejected. INFO bit 0 stays unset.
+
+### Durable monotonic counter
+
+- The counter is internally allocated, nonzero, and signed into DEV_MSG_V0.
+  Clients cannot choose its value. INFO bit 1 indicates this feature.
+- NVS stores an upper reservation boundary in `pathnod/counter_v1`. Before using
+  a new block, firmware commits a reservation of **64** values. At boot it starts
+  strictly above the persisted boundary, skipping unused reserved values.
+  Gaps are expected; counters must increase, not necessarily be consecutive.
+- This reduces flash commits to one per 64 responses (plus boot-related skipped
+  blocks), rather than committing every challenge. The first response after boot
+  and each block boundary include NVS latency in the existing processing metric.
+  Those boundaries must also satisfy the pending hardware < 50 ms test.
+- Existing DEV-20/21 identities migrate without changing their seed/public key
+  when neither counter field exists. The first reservation also persists
+  `counter_mode=1`. A missing counter after that marker exists, wrong NVS type,
+  read/open/write/commit error or exhausted 32-bit range fails closed; no automatic
+  reset is performed. A failed reservation disables signing until reinitialization.
+  If a boundary exists without its marker after a partial write, it is treated as
+  reserved (not reset); the next successful reservation persists the marker.
+- NVS snapshots restored to older values, deleting both counter fields, malicious
+  firmware and flash erasure are **not hardware rollback protected**. Never erase
+  or restore NVS while retaining the registered identity; production anti-rollback
+  needs a separate provisioning design. Encryption alone does not provide it.
+- Capability bits **1** (counter) and **3** (replay/rate guard) are set. Clock,
+  evidence, secure-element and externally linked identity bits remain clear.
+  Advertising is unchanged: configured **1600 BLE interval units = 1 Hz**, plus
+  the standard BLE advertising jitter. This is not a battery-consumption claim.
+
+### Hardware acceptance — @kazai777
+
+1. Read INFO: capability bytes must be `00 00 00 0a`. Verify each response with
+   the Node script, including its nonzero counter.
+2. Send three different nonces, each at least two seconds apart. Signatures must
+   verify and counters must increase. The existing DEV-10 ChallengeScan app sends
+   challenges immediately; its pacing must be adapted for DEV-23, or use an ATT
+   test client with controlled timing. Do not disable firmware limits for the demo.
+3. Retry a nonce after two seconds, with changed epoch/hint, and after reconnect:
+   all must fail while cached. Retry after ten minutes: it may succeed within quota.
+4. Send a fresh challenge before two seconds: it must fail. Reconnect rapidly and
+   attempt a 31st challenge within a rolling minute: it must fail. The same nonce
+   may be retried once the rate limit expires if it was never admitted.
+5. Save the last emitted counter, reboot without erasing flash, then send a fresh
+   challenge. Its counter must be greater, while the public key stays unchanged.
+   Repeat with power interruption near a reservation boundary on a test board.
+6. Measure latency on the first response and across at least 65 accepted responses
+   (two reservation blocks). Record maximum, board, clock, MTU and radio RTT.
+   Host tests cannot verify real NVS crash recovery, radio timing or flash wear.
+
+Task: [DEV-22](https://app.notion.com/p/3e2bc83eb4a280d287eae2bad8d1fd57),
+[GitHub issue #43](https://github.com/Pathnod/pathnod/issues/43).
+Stack base: `feat/dev-21-esp32-gatt-challenge-response`.
+
+### Size budget
+
+The SDK configuration selects `CONFIG_COMPILER_OPTIMIZATION_SIZE=y` without
+disabling storage protection or protocol features. Size means the **uncompressed
+application `pathnod_device.bin`**, excluding bootloader, partition table and NVS;
+the acceptance threshold is strictly **< 200,000 bytes**. `idf.py size` also reports
+ELF archive contributions, but is not a substitute for actual binary size.
+CI reports binary bytes and warns when this target is exceeded. It intentionally
+keeps functional/build checks useful: **green build checks do not establish the
+DEV-22 size acceptance criterion**. The budget remains unresolved.
 
 ## Protected storage profile — operator review required
 
@@ -210,7 +297,7 @@ These tests use the real session/signing code, but not NimBLE or the BLE radio.
    need not be named in the advertising list.
 3. Inspect its 128-bit Service Data: eight ID-prefix bytes following the UUID.
 4. Connect, discover the service and read INFO. Check the 70-byte length,
-   version/curve, public key and zero capabilities/protocol hint.
+   version/curve, public key, capabilities `00 00 00 0a` and zero protocol hint.
 5. Independently compute SHA-256 of the 17 ASCII domain bytes followed by the
    32-byte INFO public key. Compare its first eight bytes to Service Data.
 6. Reboot/power-cycle without erasing flash. Repeat: public key and ID prefix
@@ -249,3 +336,22 @@ Protocol: [Pathnod Spec §1, §2.1, §2.4, §2.6](https://app.notion.com/p/Pathn
 - No board was flashed and no eFuse was programmed. Real BLE reads/writes,
   notification delivery, MTU fallback and < 50 ms processing are **pending**
   the hardware acceptance procedure above; DEV-21 is not fully validated yet.
+
+## DEV-22 validation record (2026-10-04)
+
+- Host development/protected tests pass with real libsodium, including ASan/UBSan.
+  Covered: counter-signed Node.js/OpenSSL vector, INFO bytes, exact rate boundaries,
+  reconnect/global quota, replay/hint changes, fixed expiry, LRU eviction, full
+  300-nonce window, storage failures (including ambiguous commit), marker corruption,
+  reservation-boundary restart, zeroed rejected responses and 32-bit exhaustion.
+- Four clean ESP-IDF v5.5.1 target/profile builds pass with size optimization.
+  Protected configurations retain all encryption and already-enabled guards.
+  Dependency lockfiles are unchanged. No board was flashed or eFuse programmed.
+- Final application binaries: C3 development **617,200 bytes**, S3 development
+  **600,688 bytes**, C3 protected **620,384 bytes**, S3 protected **603,632 bytes**.
+  All are **above 200,000 bytes**; no compression or different size convention
+  is used to claim compliance. Archive analysis identifies significant SDK/BLE,
+  libsodium, libc and crypto contributions; simple size optimization is insufficient.
+- **Open acceptance items:** < 200 KB binary budget, real NVS power-interruption
+  recovery, BLE 1 Hz observation, radio/MTU behavior, < 50 ms including reservation
+  writes, and battery behavior. DEV-22 must not be marked fully validated yet.

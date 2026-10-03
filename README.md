@@ -63,9 +63,11 @@ running system yet.
   [ADR 0002](docs/decisions/0002-development-attestation.md).
 - The circuits implement a depth-20 observation circuit and a development-only
   Groth16 setup/proof harness. See the [circuits README](packages/circuits/README.md).
-- `firmware/esp32` provides DEV-20/21 ESP-IDF/NimBLE discovery and persistent
+- `firmware/esp32` provides DEV-20/21/22 ESP-IDF/NimBLE discovery and persistent
   Ed25519 identity baseline, with separate development/protected storage
-  profiles, plus GATT challenge/response signing over `SHA-256(DEV_MSG_V0)`.
+  profiles, plus GATT challenge/response signing over `SHA-256(DEV_MSG_V0)`,
+  replay/rate guards and NVS-backed monotonic counters. The < 200 KB size target
+  is not met; a passing firmware build is not full DEV-22 acceptance.
   Radio behavior and the < 50 ms target still require hardware validation. See the
   [firmware README](firmware/esp32/README.md) for build and iPhone validation.
 - `programs/pathnod` includes development-only Groth16 verification and
