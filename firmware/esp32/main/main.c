@@ -1,6 +1,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "nvs_flash.h"
 #include "nimble/nimble_port.h"
 #include "nimble/nimble_port_freertos.h"
@@ -10,16 +11,27 @@
 #include "services/gatt/ble_svc_gatt.h"
 #include "identity.h"
 #include "advertising.h"
+#include "session.h"
+
+#if CONFIG_BT_NIMBLE_MAX_CONNECTIONS != 1
+#error "Pathnod GATT session currently requires exactly one BLE connection"
+#endif
 
 static const char *TAG = "pathnod";
 static pathnod_identity_t identity;
 static uint8_t address_type;
+static pathnod_session_t session;
+static uint16_t response_handle;
 static const ble_uuid128_t service_uuid = BLE_UUID128_INIT(
     1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x4c, 0x45, 0x56, 0x4f, 0x53);
 static const ble_uuid128_t info_uuid = BLE_UUID128_INIT(
     2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x4c, 0x45, 0x56, 0x4f, 0x53);
 
-// Public identity inspection only. CHALLENGE/RESPONSE belong to DEV-21.
+static const ble_uuid128_t challenge_uuid = BLE_UUID128_INIT(
+    3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x4c, 0x45, 0x56, 0x4f, 0x53);
+static const ble_uuid128_t response_uuid = BLE_UUID128_INIT(
+    4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x4c, 0x45, 0x56, 0x4f, 0x53);
+
 static int info_read(uint16_t conn, uint16_t attr,
                      struct ble_gatt_access_ctxt *ctxt, void *arg)
 {
@@ -31,8 +43,61 @@ static int info_read(uint16_t conn, uint16_t attr,
         ? 0 : BLE_ATT_ERR_INSUFFICIENT_RES;
 }
 
+static int response_read(uint16_t conn, uint16_t attr,
+                         struct ble_gatt_access_ctxt *ctxt, void *arg)
+{
+    (void)attr; (void)arg;
+    if (ctxt->op != BLE_GATT_ACCESS_OP_READ_CHR) return BLE_ATT_ERR_READ_NOT_PERMITTED;
+    if (!pathnod_session_matches(&session, conn) || !session.valid)
+        return BLE_ATT_ERR_UNLIKELY;
+    return os_mbuf_append(ctxt->om, session.response, sizeof(session.response)) == 0
+        ? 0 : BLE_ATT_ERR_INSUFFICIENT_RES;
+}
+
+static int challenge_write(uint16_t conn, uint16_t attr,
+                           struct ble_gatt_access_ctxt *ctxt, void *arg)
+{
+    (void)attr; (void)arg;
+    if (ctxt->op != BLE_GATT_ACCESS_OP_WRITE_CHR) return BLE_ATT_ERR_WRITE_NOT_PERMITTED;
+    if (!pathnod_session_matches(&session, conn)) return BLE_ATT_ERR_UNLIKELY;
+    int64_t start = esp_timer_get_time();
+    // NimBLE assembles and validates ATT Prepare/Execute writes before this
+    // callback. Never sign partial values or retain a previous response on error.
+    session.valid = false;
+    memset(session.response, 0, sizeof(session.response));
+    uint8_t challenge[PATHNOD_CHALLENGE_LENGTH];
+    uint16_t length = 0;
+    if (OS_MBUF_PKTLEN(ctxt->om) != sizeof(challenge))
+        return BLE_ATT_ERR_INVALID_ATTR_VALUE_LEN;
+    if (ble_hs_mbuf_to_flat(ctxt->om, challenge, sizeof(challenge), &length) != 0)
+        return BLE_ATT_ERR_UNLIKELY;
+    if (pathnod_session_challenge(&session, conn, challenge, length) != ESP_OK)
+        return BLE_ATT_ERR_UNLIKELY;
+    if (session.subscribed) {
+        uint16_t mtu = ble_att_mtu(conn);
+        if (mtu < 23) return BLE_ATT_ERR_UNLIKELY;
+        size_t notify_length = sizeof(session.response);
+        if (notify_length > (size_t)(mtu - 3)) notify_length = mtu - 3;
+        struct os_mbuf *om = ble_hs_mbuf_from_flat(session.response, notify_length);
+        if (om == NULL) return BLE_ATT_ERR_INSUFFICIENT_RES;
+        // Ownership transfers even on failure. The full response remains readable.
+        int rc = ble_gatts_notify_custom(conn, response_handle, om);
+        if (rc != 0) {
+            ESP_LOGW(TAG, "Response notification enqueue failed (%d); read available", rc);
+            return BLE_ATT_ERR_INSUFFICIENT_RES;
+        }
+    }
+    int64_t elapsed = esp_timer_get_time() - start;
+    ESP_LOGI(TAG, "Challenge processing + notification enqueue: %lld us", (long long)elapsed);
+    if (elapsed >= 50000) ESP_LOGW(TAG, "DEV-21 50 ms processing target exceeded");
+    return 0;
+}
+
 static const struct ble_gatt_chr_def characteristics[] = {
     {.uuid = &info_uuid.u, .access_cb = info_read, .flags = BLE_GATT_CHR_F_READ},
+    {.uuid = &challenge_uuid.u, .access_cb = challenge_write, .flags = BLE_GATT_CHR_F_WRITE},
+    {.uuid = &response_uuid.u, .access_cb = response_read,
+     .flags = BLE_GATT_CHR_F_READ | BLE_GATT_CHR_F_NOTIFY, .val_handle = &response_handle},
     {0}
 };
 static const struct ble_gatt_svc_def services[] = {
@@ -48,8 +113,17 @@ static int gap_event(struct ble_gap_event *event, void *arg)
     switch (event->type) {
     case BLE_GAP_EVENT_CONNECT:
         if (event->connect.status != 0) advertise();
+        else pathnod_session_connect(&session, event->connect.conn_handle);
         break;
     case BLE_GAP_EVENT_DISCONNECT:
+        pathnod_session_reset(&session);
+        advertise();
+        break;
+    case BLE_GAP_EVENT_SUBSCRIBE:
+        if (pathnod_session_matches(&session, event->subscribe.conn_handle) &&
+            event->subscribe.attr_handle == response_handle)
+            session.subscribed = event->subscribe.cur_notify;
+        break;
     case BLE_GAP_EVENT_ADV_COMPLETE:
         advertise();
         break;
@@ -92,6 +166,7 @@ static void on_sync(void)
 
 static void on_reset(int reason)
 {
+    pathnod_session_reset(&session);
     ESP_LOGW(TAG, "BLE host reset (%d); waiting for synchronization", reason);
 }
 
