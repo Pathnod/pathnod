@@ -7,6 +7,7 @@
 #include "advertising.h"
 #include "nvs.h"
 #include "sdkconfig.h"
+#include "session.h"
 
 static uint8_t stored_seed[32];
 static bool exists, encrypted = true;
@@ -108,10 +109,68 @@ static void test_advertising(void)
     assert(memcmp(rsp + 18, id, 8) == 0);
 }
 
+static void test_challenge_response(void)
+{
+    uint8_t challenge[44], response[78], digest[32];
+    for (size_t i = 0; i < sizeof(challenge); ++i) challenge[i] = (uint8_t)i;
+    assert(pathnod_identity_respond(challenge, 44, response) == ESP_ERR_INVALID_STATE);
+    commit_error = ESP_OK; exists = true;
+    for (size_t i = 0; i < 32; ++i) stored_seed[i] = (uint8_t)i;
+    pathnod_identity_t identity;
+    assert(pathnod_identity_init(&identity) == ESP_OK);
+    assert(pathnod_identity_respond(challenge, 44, response) == ESP_OK);
+    // Independent Node.js/OpenSSL Ed25519 vector (public test seed 00..1f).
+    uint8_t expected_signature[64];
+    assert(sodium_hex2bin(expected_signature, 64,
+        "dceadd957da380f4ef5217e8e336c5d3840587b0662a576d5ddc68324d4c64c37"
+        "ca514895d6ec6f94fca7d727beb03a7a039e0e5bfbadf3e51c3437b31841405",
+        128, NULL, NULL, NULL) == 0);
+    assert(memcmp(response, expected_signature, sizeof(expected_signature)) == 0);
+    // Independent layout: 20 domain + nonce32 + epoch4 + hint8 + ts8 +
+    // counter4 + evidence_hash32. Signing the raw message must NOT verify.
+    uint8_t message[108] = {0};
+    memcpy(message, "Pathnod/challenge/v0", 20);
+    memcpy(message + 20, challenge, 44);
+    crypto_hash_sha256(digest, message, sizeof(message));
+    assert(crypto_sign_verify_detached(response, digest, 32, identity.public_key) == 0);
+    assert(crypto_sign_verify_detached(response, message, 108, identity.public_key) != 0);
+    for (size_t i = 64; i < 78; ++i) assert(response[i] == 0);
+    for (size_t i = 20; i < 108; ++i) {
+        message[i] ^= 1;
+        crypto_hash_sha256(digest, message, sizeof(message));
+        assert(crypto_sign_verify_detached(response, digest, 32, identity.public_key) != 0);
+        message[i] ^= 1;
+    }
+    pathnod_session_t session;
+    pathnod_session_reset(&session);
+    assert(pathnod_session_challenge(&session, 7, challenge, 44) == ESP_ERR_INVALID_STATE);
+    pathnod_session_connect(&session, 7);
+    assert(pathnod_session_challenge(&session, 8, challenge, 44) == ESP_ERR_INVALID_STATE);
+    assert(pathnod_session_challenge(&session, 7, challenge, 44) == ESP_OK && session.valid);
+    for (size_t length = 0; length <= 45; ++length) {
+        if (length == 44) continue;
+        assert(pathnod_session_challenge(&session, 7, challenge, length) == ESP_ERR_INVALID_ARG);
+        assert(!session.valid);
+        for (size_t i = 0; i < 78; ++i) assert(session.response[i] == 0);
+    }
+    assert(pathnod_session_challenge(&session, 7, NULL, 44) == ESP_ERR_INVALID_ARG);
+    assert(pathnod_identity_respond(challenge, 44, NULL) == ESP_ERR_INVALID_ARG);
+    assert(pathnod_session_challenge(&session, 7, challenge, 44) == ESP_OK);
+    session.subscribed = true;
+    pathnod_session_connect(&session, 7); // Reused connection handle is a new session.
+    assert(!session.valid && !session.subscribed);
+    pathnod_session_reset(&session);
+    assert(!pathnod_session_matches(&session, 7));
+    open_error = ESP_FAIL;
+    assert(pathnod_identity_init(&identity) == ESP_FAIL);
+    assert(pathnod_identity_respond(challenge, 44, response) == ESP_ERR_INVALID_STATE);
+}
+
 int main(void)
 {
     test_identity();
     test_advertising();
-    puts("DEV-20 identity/storage and advertising tests passed");
+    test_challenge_response();
+    puts("DEV-20/21 identity, advertising and challenge/response tests passed");
     return 0;
 }
