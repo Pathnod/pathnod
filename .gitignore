@@ -34,6 +34,10 @@ xcuserdata/
 firmware/**/build/
 firmware/**/sdkconfig
 firmware/**/sdkconfig.old
+firmware/**/build-*/
+firmware/**/sdkconfig.*.local
+firmware/**/managed_components/
+firmware/**/*.bin
 
 # Editors and OS
 .DS_Store

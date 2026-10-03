@@ -1,0 +1,8 @@
+menu "Pathnod"
+config PATHNOD_REQUIRE_ENCRYPTED_STORAGE
+    bool "Require flash and NVS encryption before creating/loading identity"
+    default n
+    help
+        Protected profile only. Enabling flash encryption can irreversibly
+        program eFuses on first boot. Never flash this profile without review.
+endmenu

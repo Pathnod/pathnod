@@ -1,0 +1,2 @@
+idf_component_register(SRCS "main.c" "identity.c" "advertising.c"
+    INCLUDE_DIRS "." REQUIRES bt nvs_flash espressif__libsodium bootloader_support)
