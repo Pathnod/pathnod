@@ -76,8 +76,7 @@ packages/circuits/node_modules/.bin/snarkjs r1cs info /tmp/observation.r1cs
 
 On Circom 2.2.3 with `--O2`, the circuit has 5,891 constraints and seven public
 inputs. This exceeds the spec's approximately 2,000-constraint estimate, but
-fits the 2^14 powers-of-tau size used by the local Groth16 flow below. Mobile
-proving and on-chain verification remain DEV-14 and DEV-15 work.
+fits the 2^14 powers-of-tau size used by the local Groth16 flow below.
 
 ## DEV-13 local Groth16 proof
 
@@ -126,6 +125,8 @@ device proving with these local artifacts.
 DEV-15 permits a disposable devnet compatibility spike only; see
 [the Solana verifier guide](../../docs/dev15-solana-groth16.md) for conversion,
 local/devnet commands, negative tests and compute-unit reporting.
+For on-chain development-only submission and duplicate-nullifier checks, see
+the [DEV-16 runbook](../../docs/dev16-observation-submit.md).
 The DEV-13 command alone does not test either integration.
 
 ## Test

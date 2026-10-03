@@ -3,8 +3,9 @@
 This spike builds on DEV-13's depth-20 observation circuit, without changing
 its seven public inputs or setup. It is **development-only**, not a production
 ceremony, registry, BLE attestation check, or observation acceptance API.
-DEV-16 must select a trusted key, bind the transcript, validate roots/epochs,
-and enforce nullifier uniqueness before accepting observations.
+DEV-16 adds nullifier uniqueness to a development-only submission path.
+Trusted-key selection, transcript binding, and root/epoch policy remain later
+protocol work.
 
 ## Wire contract
 

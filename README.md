@@ -39,7 +39,7 @@ docs/                architecture decisions and project notes
 
 ## Current status
 
-Pathnod is at an early scaffold stage. The intended protocol above is not a
+Pathnod is at an early development stage. The intended protocol above is not a
 running system yet.
 
 - `packages/verifier` implements the development-only attestation verifier:
@@ -63,9 +63,9 @@ running system yet.
   [ADR 0002](docs/decisions/0002-development-attestation.md).
 - The circuits implement a depth-20 observation circuit and a development-only
   Groth16 setup/proof harness. See the [circuits README](packages/circuits/README.md).
-- `programs/pathnod` includes a DEV-15 Groth16 verification/CU spike with
-  caller-selected immutable test keys. It is not an observation acceptance API
-  and has no registry, nullifier uniqueness, reward, or payment logic.
+- `programs/pathnod` includes development-only Groth16 verification and
+  observation submission with one commitment PDA per nullifier. The key is
+  caller-selected; there is no trusted registry, reward, or payment logic.
 - The repository currently establishes component boundaries and a reproducible
   development toolchain.
 
@@ -93,6 +93,7 @@ artifacts, or build output.
 - [Development-only attestation stubs](docs/decisions/0002-development-attestation.md)
 - [Foreground BLE density scan](docs/decisions/0003-foreground-ble-density-scan.md)
 - [DEV-15 Solana Groth16 verification spike](docs/dev15-solana-groth16.md)
+- [DEV-16 observation submission spike](docs/dev16-observation-submit.md)
 
 ## Contributing
 
