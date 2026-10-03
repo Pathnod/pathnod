@@ -10,6 +10,7 @@ let package = Package(
     ],
     products: [
         .library(name: "PathnodAttestation", targets: ["PathnodAttestation"]),
+        .library(name: "PathnodAppAttest", targets: ["PathnodAppAttest"]),
         .library(name: "PathnodDensityCore", targets: ["PathnodDensityCore"]),
         .library(name: "PathnodChallengeCore", targets: ["PathnodChallengeCore"]),
     ],
@@ -18,6 +19,11 @@ let package = Package(
         .testTarget(
             name: "PathnodAttestationTests",
             dependencies: ["PathnodAttestation"]
+        ),
+        .target(name: "PathnodAppAttest"),
+        .testTarget(
+            name: "PathnodAppAttestTests",
+            dependencies: ["PathnodAppAttest"]
         ),
         .target(name: "PathnodDensityCore"),
         .testTarget(
