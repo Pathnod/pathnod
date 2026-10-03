@@ -63,6 +63,10 @@ running system yet.
   [ADR 0002](docs/decisions/0002-development-attestation.md).
 - The circuits implement a depth-20 observation circuit and a development-only
   Groth16 setup/proof harness. See the [circuits README](packages/circuits/README.md).
+- `firmware/esp32` provides the DEV-20 ESP-IDF/NimBLE discovery and persistent
+  Ed25519 identity baseline, with separate development/protected storage
+  profiles. Challenge signing is not implemented yet. See the
+  [firmware README](firmware/esp32/README.md) for build and iPhone validation.
 - `programs/pathnod` includes development-only Groth16 verification and
   observation submission with one commitment PDA per nullifier. The key is
   caller-selected; there is no trusted registry, reward, or payment logic.
