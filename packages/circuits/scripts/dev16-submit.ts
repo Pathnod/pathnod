@@ -37,7 +37,7 @@ function scalar(value: unknown): Buffer {
 }
 function submission(proofBytes: Buffer): Buffer {
   assert.equal(proofBytes.length, 480);
-  return Buffer.concat([proofBytes.subarray(256), proofBytes.subarray(0, 256)]);
+  return Buffer.concat([proofBytes.subarray(384, 416), proofBytes.subarray(256), proofBytes.subarray(0, 256)]);
 }
 
 async function main(): Promise<void> {
@@ -137,6 +137,12 @@ async function main(): Promise<void> {
   const badInput = await send(await signed(submit(submission(changedProof), changedCommitment, wallet.publicKey), wallet), invalidProof);
   assert.equal(await connection.getAccountInfo(changedCommitment), null, "Invalid public input created a commitment");
 
+  const mismatched = submission(proofBytes);
+  mismatched.fill(0, 0, 32);
+  const mismatchedCommitment = commitmentFor(mismatched.subarray(0, 32));
+  const badNullifier = await send(await signed(submit(mismatched, mismatchedCommitment, wallet.publicKey), wallet), invalidProof);
+  assert.equal(await connection.getAccountInfo(mismatchedCommitment), null, "Mismatched nullifier created a commitment");
+
   const accepted = await send(await signed(submit(submission(proofBytes), commitment, wallet.publicKey), wallet));
   const account = await connection.getAccountInfo(commitment);
   assert.ok(account && account.owner.equals(program), "Commitment PDA is missing");
@@ -164,6 +170,7 @@ async function main(): Promise<void> {
     commitment: commitment.toBase58(), nullifier: inputs[4], acceptedSlot,
     acceptedSignature: accepted.signature, duplicateSignature: replay.signature,
     invalidProofSignature: badProof.signature, invalidInputSignature: badInput.signature,
+    mismatchedNullifierSignature: badNullifier.signature,
     publicInputOrder: PUBLIC_INPUT_ORDER, verificationCU,
     transactionCU: accepted.meta.computeUnitsConsumed, transactionBytes: accepted.bytes,
     budget: 400_000, keySha256: createHash("sha256").update(keyBytes).digest("hex"),

@@ -52,11 +52,13 @@ pub mod pathnod {
     /// DEV-16: prove once per nullifier with a caller-selected test key.
     pub fn submit_observation(
         ctx: Context<SubmitObservation>,
+        nullifier: [u8; 32],
         public_inputs: [[u8; 32]; 7],
         proof_a: [u8; 64],
         proof_b: [u8; 128],
         proof_c: [u8; 64],
     ) -> Result<()> {
+        require!(nullifier == public_inputs[4], SpikeError::InvalidProof);
         require!(
             !ctx.accounts.commitment.accepted,
             SpikeError::NullifierAlreadyUsed
@@ -71,7 +73,7 @@ pub mod pathnod {
 
         let commitment = &mut ctx.accounts.commitment;
         commitment.accepted = true;
-        commitment.nullifier = public_inputs[4];
+        commitment.nullifier = nullifier;
         commitment.public_inputs = public_inputs;
         commitment.verifier_config = ctx.accounts.config.key();
         commitment.submitter = ctx.accounts.submitter.key();
@@ -129,12 +131,12 @@ pub struct VerifyGroth16Spike<'info> {
 }
 
 #[derive(Accounts)]
-#[instruction(public_inputs: [[u8; 32]; 7])]
+#[instruction(nullifier: [u8; 32])]
 pub struct SubmitObservation<'info> {
     #[account(seeds = [b"dev15-vk", config.authority.as_ref()], bump)]
     pub config: Account<'info, Groth16SpikeConfig>,
     #[account(init_if_needed, payer = submitter, space = ObservationCommitment::SPACE,
-        seeds = [b"obs", public_inputs[4].as_ref()], bump)]
+        seeds = [b"obs", nullifier.as_ref()], bump)]
     pub commitment: Account<'info, ObservationCommitment>,
     #[account(mut)]
     pub submitter: Signer<'info>,

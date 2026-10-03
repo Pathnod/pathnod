@@ -6,6 +6,9 @@ immutable DEV-15 test key, then records the nullifier at the program PDA
 address, submitter, and acceptance slot. A second submission of the same
 nullifier fails with `E_NULLIFIER` (custom error 6001), even with another
 payer. A failed proof or changed public input does not create a commitment.
+The instruction carries the 32-byte nullifier separately so Anchor can
+describe its PDA seed in the IDL; the program requires it to equal the fifth
+public input before verifying or recording the observation.
 
 This is a development-only integration. The key is selected by its creator;
 neither the circuit's transcript nor a registry, active root, epoch, device,
@@ -69,32 +72,35 @@ pnpm --filter @pathnod/circuits dev16:submit \
   --program REPLACE_WITH_FRESH_PROGRAM_ID
 ```
 
-## Local validation on 2026-10-02
+## Local validation on 2026-10-03
 
 Agave 4.2.2 accepted the valid observation and rejected a corrupted proof,
-changed nullifier input, and replay from another payer. Both invalid-proof
-transactions left their target PDAs absent. The replay returned
+changed nullifier input, a nullifier argument that disagreed with that input,
+and replay from another payer. All three invalid submissions left their
+target PDAs absent. The replay returned
 `E_NULLIFIER` (6001) without changing the commitment. The valid transaction
-used **126,861 CU** with a **400,000-CU** budget; the Groth16 verifier used
-**113,334 CU**, and the signed transaction was **798 bytes**, below Solana's
+used **126,628 CU** with a **400,000-CU** budget; the Groth16 verifier used
+**113,334 CU**, and the signed transaction was **830 bytes**, below Solana's
 1,232-byte packet limit. Generated proofs, reports, and wallets remain outside
 Git.
 
-## Devnet validation on 2026-10-02
+## Devnet validation on 2026-10-03
 
 The same synthetic proof was submitted to the disposable devnet program
-`9eniETGGSrez7YaAPPWpH5oULKPVC24z3NKJBcDZ4pKL`. The
-[valid submission](https://explorer.solana.com/tx/67Da1Ys6wuH1oV4BpBaL2UWiButdQnNtriMt8mkjtpJSn2QN64nMDYxEz2eHW1aSTvb2e7suLg5TkQWrTSH8sSPA?cluster=devnet)
-created commitment PDA `GFYXtajt4Ss968kfYDsPfaFXESHZTT1dQYBFmmhpVy5W`.
+`AGimQYqrUsNNg37CgrgooKf7utGQdHwj1GDtTMCVKBeK`. The
+[valid submission](https://explorer.solana.com/tx/4MJAXiEApwPeVJq6CzFpytiLMVKJCYPBxVBjBrnEtvCHjSuirAEGGtkz2faATUYj1pD2GiFEw9UceeBuNNDrc127?cluster=devnet)
+created commitment PDA `DjvMNs2uvBvjjz1qS3vWWXZ8bkNrqprQS14H1oTKKQy3`.
 The
-[replay from a second payer](https://explorer.solana.com/tx/4taJ8ospwCMhYJPZKuXnNUiH3BFvPSpzNRBSH9CCrftHhXX4LRHV91vfz3Fb5UYGS63meLYncEgM1AHveMKgKrct?cluster=devnet)
+[replay from a second payer](https://explorer.solana.com/tx/2D46J1Xhxt7C8CaUnkUiUZAE68GbrhD8DBm7Kcm6yoQZ7e4SZd1fERsJKKFCqqng7xwRjCEvmxC5n9RYD2pMJpbq?cluster=devnet)
 failed with `E_NULLIFIER` (6001) and left the commitment unchanged. A
-[corrupted proof](https://explorer.solana.com/tx/4tCRx2UNNRgwNPxKykojbZyVeEdjWp83ME8qyCAongnHvqu11LAs6ZW5XAbULLAaCGYcZKzEGvyUhhfLK4NR5zzW?cluster=devnet)
+[corrupted proof](https://explorer.solana.com/tx/4EHD3mVGyNUNF85DnxsiR4tAdkyvmybgn4v73sDwzDhBEFLA7JUbHdctg13UYTdd9btArwW5eRB8z1pUrqonCecT?cluster=devnet)
 and a
-[changed nullifier input](https://explorer.solana.com/tx/5D5GwYfXFBPYEaArc46wvqWu7gsW5iR8ybT6EsojboyKi3YSJfrkvfcViKWG7a9p4GutwArNngY1fBThPAPTbnSa?cluster=devnet)
-both failed with verifier error 6000 and left their target PDAs absent.
+[changed nullifier input](https://explorer.solana.com/tx/5Cz1ryuWZK1fvAZZbknBL3H4fV6WgTG8dJsSHi78nAk7wKiSoM8ur4Sji6bwT1FVcWgZEcsQFLB82ye5nFAUYH3s?cluster=devnet)
+failed with verifier error 6000. A
+[mismatched nullifier argument](https://explorer.solana.com/tx/5g6Y37qQ316upEEeFT1UM2HzXr2cM11B4P7MyLxajKjxTb8EFSv3TdnPDTpks3jaap1xePWc7bmGLzHXWpCCv5nh?cluster=devnet)
+also failed with error 6000. All three target PDAs remained absent.
 
-The valid devnet transaction used **132,861 CU**, including **113,334 CU**
+The valid devnet transaction used **125,128 CU**, including **113,334 CU**
 for Groth16 verification, with a **400,000-CU** budget. Its signed packet was
-**798 bytes**. The disposable verification key's SHA-256 is
+**830 bytes**. The disposable verification key's SHA-256 is
 `958efe006ebab61251b11aaf003c100e5a95f0f51525f7c55d4bd7f07c18e683`.
