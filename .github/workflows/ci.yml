@@ -193,7 +193,8 @@ jobs:
           # Commit for the signed Anchor v1.2.0 tag.
           cargo install --git https://github.com/otter-sec/anchor --rev 84a63f9f7112b23581816436fbcf3f6c515779f9 avm --locked --force
           avm nightly --disable || true
-          avm install 1.2.0
+          # Build from source: release-binary provenance downloads can return 403 in CI.
+          avm install 1.2.0 --from-source
           avm use 1.2.0
 
       - name: Verify Anchor version
