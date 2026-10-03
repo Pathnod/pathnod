@@ -6,6 +6,7 @@ import SwiftUI
 
 private enum TrialError: Error {
     case randomGenerationFailed
+    case duplicateChallenge
 }
 
 @MainActor
@@ -16,37 +17,54 @@ private final class TrialModel: ObservableObject {
     @Published var assertionDescription = "Not requested"
     @Published var isRunning = false
 
-    private let client = AppAttestClient(
-        service: SystemAppAttestService(),
-        store: KeychainAppAttestKeyStore(
-            service: ProcessInfo.processInfo.environment["APP_ATTEST_KEYCHAIN_SERVICE"] ?? "xyz.pathnod.appattestspike"
-        )
-    )
-
     func run() async {
         isRunning = true
         status = "Running"
         defer { isRunning = false }
 
         do {
+            let capture = try DeviceEvidenceCapture.isRequested ? DeviceEvidenceCapture.load() : nil
+            let keychainService = capture?.keychainService
+                ?? ProcessInfo.processInfo.environment["APP_ATTEST_KEYCHAIN_SERVICE"]
+                ?? "xyz.pathnod.appattestspike"
+            let client = AppAttestClient(
+                service: SystemAppAttestService(),
+                store: KeychainAppAttestKeyStore(service: keychainService)
+            )
             guard client.isSupported else { throw AppAttestClientError.unsupported }
+            var attestationObject: Data?
             if let record = try client.currentKey(), record.attestationReturned {
+                guard capture == nil else { throw AppAttestClientError.alreadyAttested }
                 keyDescription = "Reused key fingerprint \(fingerprint(record.keyID))"
                 attestationDescription = "Returned on a previous run"
             } else {
-                let hash = try client.currentKey()?.retryClientDataHash ?? freshChallengeHash()
+                let hash = try capture.map { try $0.hash($0.attestationChallenge) }
+                    ?? client.currentKey()?.retryClientDataHash
+                    ?? freshChallengeHash()
                 let attestation = try await client.attest(clientDataHash: hash)
                 keyDescription = "\(attestation.reusedKey ? "Reused" : "New") key fingerprint \(fingerprint(attestation.keyID))"
                 attestationDescription = "Returned \(attestation.object.count) bytes"
+                attestationObject = attestation.object
             }
 
-            let firstHash = try freshChallengeHash()
-            var secondHash = try freshChallengeHash()
-            while secondHash == firstHash {
-                secondHash = try freshChallengeHash()
+            let firstHash = try capture.map { try $0.hash($0.firstAssertionChallenge) } ?? freshChallengeHash()
+            var secondHash = try capture.map { try $0.hash($0.secondAssertionChallenge) } ?? freshChallengeHash()
+            if capture == nil {
+                while secondHash == firstHash {
+                    secondHash = try freshChallengeHash()
+                }
             }
+            guard secondHash != firstHash else { throw TrialError.duplicateChallenge }
             let first = try await client.assert(clientDataHash: firstHash)
             let second = try await client.assert(clientDataHash: secondHash)
+            if let capture, let attestationObject {
+                try capture.save(
+                    keyID: first.keyID,
+                    attestation: attestationObject,
+                    firstAssertion: first.object,
+                    secondAssertion: second.object
+                )
+            }
             assertionDescription = "Two distinct challenges: \(first.object.count) and \(second.object.count) bytes"
             status = "Succeeded"
         } catch {
@@ -76,7 +94,7 @@ struct AppAttestSpikeView: View {
         NavigationStack {
             Form {
                 Section("Development App Attest") {
-                    Text("This harness requests real App Attest objects on a supported iPhone. Server validation belongs to DEV-19.")
+                    Text("This harness requests real App Attest objects on a supported iPhone. Use the DEV-19 runbook for server validation.")
                     Button("Run App Attest trial") {
                         Task { await model.run() }
                     }
@@ -93,6 +111,11 @@ struct AppAttestSpikeView: View {
                 }
             }
             .navigationTitle("App Attest spike")
+        }
+        .task {
+            if DeviceEvidenceCapture.isRequested {
+                await model.run()
+            }
         }
     }
 }

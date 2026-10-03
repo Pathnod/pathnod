@@ -39,11 +39,10 @@ Attest provisioning and Keychain service value.
 
 ## Validation boundary
 
-The local challenges demonstrate object generation only. They are not issued
-or verified by a server, and the client does not parse or trust its own
-attestation or assertions. DEV-19 must validate the attestation certificate
-chain, app identity, challenge binding, and assertion counter on the server
-before any hardware assurance claim replaces the development stub.
+The ordinary UI trial demonstrates object generation only. The optional DEV-19
+capture mode uses challenges issued by the server-side gate and saves local
+evidence in the app container for the [server verification runbook](../../../docs/dev19-app-attest-server.md).
+The client does not parse or trust its own attestation or assertions.
 
 ## Evidence
 
