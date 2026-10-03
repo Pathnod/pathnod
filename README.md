@@ -94,6 +94,7 @@ artifacts, or build output.
 - [Foreground BLE density scan](docs/decisions/0003-foreground-ble-density-scan.md)
 - [DEV-15 Solana Groth16 verification spike](docs/dev15-solana-groth16.md)
 - [DEV-16 observation submission spike](docs/dev16-observation-submit.md)
+- [DEV-17 Gate 1 decision](docs/gates/dev17-gate1.md)
 
 ## Contributing
 
