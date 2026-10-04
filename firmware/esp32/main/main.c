@@ -89,7 +89,9 @@ static int challenge_write(uint16_t conn, uint16_t attr,
         }
     }
     int64_t elapsed = esp_timer_get_time() - start;
-    ESP_LOGI(TAG, "Challenge processing + notification enqueue: %lld us", (long long)elapsed);
+    // Nano printf omits 64-bit formats. Clamp diagnostics, not protocol counters.
+    uint32_t elapsed_us = elapsed > UINT32_MAX ? UINT32_MAX : (uint32_t)elapsed;
+    ESP_LOGI(TAG, "Challenge processing + notification enqueue: %u us", (unsigned)elapsed_us);
     if (elapsed >= 50000) ESP_LOGW(TAG, "DEV-21 50 ms processing target exceeded");
     return 0;
 }
