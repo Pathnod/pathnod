@@ -1,5 +1,6 @@
 import PathnodChallengeCore
 import SwiftUI
+import UIKit
 
 struct ChallengeScanView: View {
     @ObservedObject var controller: ChallengeBLEController
@@ -8,8 +9,8 @@ struct ChallengeScanView: View {
         NavigationStack {
             List {
                 Section("S1 development test") {
-                    Text("Connect to the Pathnod macOS simulator and verify three signed Bluetooth challenges on this iPhone.")
-                    Text("Keep this app open during the test. This is a protocol and timing check, not proof of physical presence or distance.")
+                    Text("Connect to a Pathnod development device (ESP32 firmware or macOS simulator) and verify three signed Bluetooth challenges on this iPhone.")
+                    Text("Keep this app open during the test. Challenges are spaced by more than two seconds to respect the device rate limit; that wait is not part of the RTT. This is a protocol and timing check, not proof of physical presence or distance.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
@@ -26,11 +27,44 @@ struct ChallengeScanView: View {
                     }
                 }
 
+                if let device = controller.device {
+                    Section("Device") {
+                        LabeledContent("Device ID prefix", value: device.deviceIDPrefix)
+                            .font(.footnote.monospaced())
+                        LabeledContent("Advertised ID", value: device.advertisedIdentity == .matched
+                            ? "matches INFO" : "not advertised")
+                        LabeledContent("Capabilities", value: device.capabilitiesHex)
+                            .font(.footnote.monospaced())
+                        if !device.capabilityNames.isEmpty {
+                            Text(device.capabilityNames.joined(separator: ", "))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        if let hint = device.protocolHint {
+                            VStack(alignment: .leading) {
+                                Text("Protocol hint")
+                                Text(hint)
+                                    .font(.caption.monospaced())
+                                    .foregroundStyle(.secondary)
+                                    .textSelection(.enabled)
+                            }
+                        } else {
+                            LabeledContent("Protocol hint", value: "zero")
+                        }
+                        LabeledContent("ATT MTU", value: "\(device.maximumWriteLength + 3)")
+                    }
+                }
+
                 if !controller.results.isEmpty {
                     Section("Verified responses") {
                         ForEach(controller.results, id: \.attempt) { result in
                             HStack {
-                                Text("Challenge \(result.attempt)")
+                                VStack(alignment: .leading) {
+                                    Text("Challenge \(result.attempt)")
+                                    Text("counter \(result.deviceCounter)")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
                                 Spacer()
                                 VStack(alignment: .trailing) {
                                     Text(String(format: "%.1f ms", result.roundTripMilliseconds))
@@ -46,6 +80,9 @@ struct ChallengeScanView: View {
                             Text("No comparable notification median: at least one response needed a read fallback.")
                                 .font(.footnote)
                                 .foregroundStyle(.secondary)
+                        }
+                        if controller.results.count == 3 {
+                            Button("Copy results") { UIPasteboard.general.string = controller.report }
                         }
                     }
                 }
