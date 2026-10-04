@@ -3,21 +3,21 @@
 import PackageDescription
 
 let package = Package(
-    name: "PathnodAttestation",
+    name: "PathnodIOS",
     platforms: [
         .iOS(.v16),
         .macOS(.v13),
     ],
     products: [
-        .library(name: "PathnodAttestation", targets: ["PathnodAttestation"]),
+        .library(name: "PathnodAppAttest", targets: ["PathnodAppAttest"]),
         .library(name: "PathnodDensityCore", targets: ["PathnodDensityCore"]),
         .library(name: "PathnodChallengeCore", targets: ["PathnodChallengeCore"]),
     ],
     targets: [
-        .target(name: "PathnodAttestation"),
+        .target(name: "PathnodAppAttest"),
         .testTarget(
-            name: "PathnodAttestationTests",
-            dependencies: ["PathnodAttestation"]
+            name: "PathnodAppAttestTests",
+            dependencies: ["PathnodAppAttest"]
         ),
         .target(name: "PathnodDensityCore"),
         .testTarget(

@@ -1,0 +1,37 @@
+name: PathnodAppAttestSpike
+options:
+  bundleIdPrefix: xyz.pathnod
+  deploymentTarget:
+    iOS: "16.0"
+packages:
+  PathnodLocal:
+    path: ..
+targets:
+  PathnodAppAttestSpike:
+    type: application
+    platform: iOS
+    sources:
+      - path: App
+    dependencies:
+      - package: PathnodLocal
+        product: PathnodAppAttest
+    settings:
+      base:
+        SWIFT_VERSION: "6.0"
+        PRODUCT_BUNDLE_IDENTIFIER: xyz.pathnod.appattestspike
+        GENERATE_INFOPLIST_FILE: YES
+        TARGETED_DEVICE_FAMILY: "1"
+        CODE_SIGN_ENTITLEMENTS: App/AppAttestSpike.entitlements
+        CODE_SIGN_STYLE: Automatic
+  PathnodAppAttestSpikeUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: UITests
+    dependencies:
+      - target: PathnodAppAttestSpike
+    settings:
+      base:
+        SWIFT_VERSION: "6.0"
+        PRODUCT_BUNDLE_IDENTIFIER: xyz.pathnod.appattestspike.uitests
+        GENERATE_INFOPLIST_FILE: YES

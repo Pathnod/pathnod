@@ -1,10 +1,15 @@
 # ADR 0002 — Development-only attestation stubs
 
-- Status: accepted for DEV-05 (issue #3)
+- Status: superseded by DEV-19 (issue #39). This records the DEV-05 design;
+  the stub implementation and shared fixture were removed in DEV-19.
 - Date: 2026-09-22
 - Scope: the attestation boundary only. Real App Attest (DEV-18/DEV-19), HTTP
   endpoints, Keychain storage, Apple certificate-chain verification, and Android
   attestation stay out.
+
+The paths, fixture, and API names below describe the DEV-05 implementation at
+the time of this decision. DEV-19 removed that implementation and its fixture;
+see [the DEV-19 runbook](../dev19-app-attest-server.md) for the current API.
 
 ## Decision
 
