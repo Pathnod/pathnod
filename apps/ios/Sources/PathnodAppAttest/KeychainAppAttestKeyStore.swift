@@ -45,6 +45,13 @@ public struct KeychainAppAttestKeyStore: AppAttestKeyStore {
         }
     }
 
+    public func clear() throws {
+        let status = SecItemDelete(identity as CFDictionary)
+        guard status == errSecSuccess || status == errSecItemNotFound else {
+            throw AppAttestClientError.keychainFailure(status)
+        }
+    }
+
     private var identity: [CFString: Any] {
         [
             kSecClass: kSecClassGenericPassword,

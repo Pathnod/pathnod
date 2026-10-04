@@ -54,6 +54,7 @@ public struct SystemAppAttestService: AppAttestService {
 public protocol AppAttestKeyStore {
     func load() throws -> AppAttestKeyRecord?
     func save(_ record: AppAttestKeyRecord) throws
+    func clear() throws
 }
 
 public struct AppAttestAttestation {
@@ -103,8 +104,20 @@ public final class AppAttestClient {
             throw AppAttestClientError.alreadyAttested
         }
 
-        let object = try await service.attestKey(key.keyID, clientDataHash: clientDataHash)
-        guard !object.isEmpty else { throw AppAttestClientError.emptyObject }
+        let object: Data
+        do {
+            object = try await service.attestKey(key.keyID, clientDataHash: clientDataHash)
+        } catch {
+            let failure = error as NSError
+            if failure.domain != DCError.errorDomain || failure.code != DCError.serverUnavailable.rawValue {
+                try store.clear()
+            }
+            throw error
+        }
+        guard !object.isEmpty else {
+            try store.clear()
+            throw AppAttestClientError.emptyObject
+        }
         try store.save(AppAttestKeyRecord(keyID: key.keyID, attestationReturned: true))
         return AppAttestAttestation(keyID: key.keyID, object: object, reusedKey: key.reused)
     }

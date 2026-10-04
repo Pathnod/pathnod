@@ -1,30 +1,29 @@
+import DeviceCheck
 import Foundation
 import PathnodAppAttest
 import XCTest
 
 @MainActor
 final class AppAttestClientTests: XCTestCase {
-    private enum ServiceFailure: Error { case unavailable }
-
     private final class ServiceDouble: AppAttestService {
         var isSupported = true
         var generated = 0
         var attested: [(String, Data)] = []
         var asserted: [(String, Data)] = []
-        var failNextAttestation = false
+        var nextAttestationError: Error?
         var attestationObject = Data([0xA1])
         var assertionObject = Data([0xA2])
 
         func generateKey() async throws -> String {
             generated += 1
-            return "test-key"
+            return generated == 1 ? "test-key" : "test-key-\(generated)"
         }
 
         func attestKey(_ keyID: String, clientDataHash: Data) async throws -> Data {
             attested.append((keyID, clientDataHash))
-            if failNextAttestation {
-                failNextAttestation = false
-                throw ServiceFailure.unavailable
+            if let error = nextAttestationError {
+                nextAttestationError = nil
+                throw error
             }
             return attestationObject
         }
@@ -40,6 +39,7 @@ final class AppAttestClientTests: XCTestCase {
 
         func load() throws -> AppAttestKeyRecord? { record }
         func save(_ record: AppAttestKeyRecord) throws { self.record = record }
+        func clear() throws { record = nil }
     }
 
     func testRejectsUnsupportedServiceAndWrongHashWidth() async throws {
@@ -70,12 +70,14 @@ final class AppAttestClientTests: XCTestCase {
         let store = StoreDouble()
         let firstClient = AppAttestClient(service: service, store: store)
         let attestationHash = Data(repeating: 1, count: 32)
-        service.failNextAttestation = true
+        service.nextAttestationError = DCError(.serverUnavailable)
 
         do {
             _ = try await firstClient.attest(clientDataHash: attestationHash)
             XCTFail("Expected service failure")
-        } catch ServiceFailure.unavailable {
+        } catch {
+            XCTAssertEqual((error as NSError).domain, DCError.errorDomain)
+            XCTAssertEqual((error as NSError).code, DCError.serverUnavailable.rawValue)
             XCTAssertEqual(store.record, AppAttestKeyRecord(keyID: "test-key", attestationReturned: false))
         }
 
@@ -102,6 +104,28 @@ final class AppAttestClientTests: XCTestCase {
         } catch {
             XCTAssertEqual(error as? AppAttestClientError, .alreadyAttested)
         }
+    }
+
+    func testInvalidKeyIsDiscardedBeforeNextAttestation() async throws {
+        let service = ServiceDouble()
+        let store = StoreDouble()
+        let client = AppAttestClient(service: service, store: store)
+        let hash = Data(count: 32)
+        service.nextAttestationError = DCError(.invalidKey)
+
+        do {
+            _ = try await client.attest(clientDataHash: hash)
+            XCTFail("Expected invalid key")
+        } catch {
+            XCTAssertEqual((error as NSError).code, DCError.invalidKey.rawValue)
+        }
+        XCTAssertNil(store.record)
+
+        let attestation = try await client.attest(clientDataHash: hash)
+        XCTAssertEqual(service.generated, 2)
+        XCTAssertEqual(service.attested.map(\.0), ["test-key", "test-key-2"])
+        XCTAssertEqual(attestation.keyID, "test-key-2")
+        XCTAssertFalse(attestation.reusedKey)
     }
 
     func testAssertionRequiresLocallyReturnedAttestation() async throws {
@@ -140,7 +164,7 @@ final class AppAttestClientTests: XCTestCase {
         } catch {
             XCTAssertEqual(error as? AppAttestClientError, .emptyObject)
         }
-        XCTAssertEqual(store.record?.attestationReturned, false)
+        XCTAssertNil(store.record)
 
         service.attestationObject = Data([0xA1])
         _ = try await client.attest(clientDataHash: hash)
