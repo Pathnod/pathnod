@@ -42,15 +42,15 @@ docs/                architecture decisions and project notes
 Pathnod is at an early development stage. The intended protocol above is not a
 running system yet.
 
-- `packages/verifier` implements the development-only attestation verifier:
-  envelope parsing, strict unpadded base64url decoding, and a constant-time
-  proof comparison. It has no HTTP endpoint, storage, or real provider.
-- `apps/ios` holds a Swift package with three products — `PathnodAttestation`, the
-  attestation provider contract and its development-only stub, and
-  `PathnodDensityCore`, the Foundation-only classification, accumulation and
-  export logic of the density study, and `PathnodChallengeCore`, the DEV-10
-  challenge protocol and verification logic — plus `Pathnod.xcodeproj` with
-  separate `PathnodDensityScan` and `PathnodChallengeScan` app targets.
+- `packages/verifier` validates Apple App Attest attestation and assertions,
+  using an Apple root certificate and a SQLite store for one-time challenges,
+  verified keys, and assertion counters. The [DEV-19 runbook](docs/dev19-app-attest-server.md)
+  documents the iPhone proof and remaining integration limits.
+- `apps/ios` holds a Swift package for the density study, challenge protocol,
+  and `PathnodAppAttest` client. The
+  [App Attest spike](apps/ios/AppAttestSpike/README.md) exercises Apple's
+  generation APIs on a supported iPhone and can export local evidence for the
+  verifier. The observer app has no App Attest request flow yet.
 - `PathnodDensityScan` is a measurement instrument for a two-hour field study,
   not the observer app: it counts BLE advertisers visible while it is open,
   never connects, never runs in the background, never asks for location, and
@@ -58,8 +58,8 @@ running system yet.
   of the production discovery protocol. See
   [ADR 0003](docs/decisions/0003-foreground-ble-density-scan.md), including the
   limits that have not been verified yet.
-- Both sides only implement the development stub, which carries no hardware
-  assurance. See
+- The DEV-05 development attestation stub was retired in DEV-19. Its original
+  design is preserved as a historical record in
   [ADR 0002](docs/decisions/0002-development-attestation.md).
 - The circuits implement a depth-20 observation circuit and a development-only
   Groth16 setup/proof harness. See the [circuits README](packages/circuits/README.md).
@@ -97,10 +97,13 @@ artifacts, or build output.
 ## Documentation
 
 - [Toolchain and monorepo baseline](docs/decisions/0001-toolchain-and-monorepo.md)
-- [Development-only attestation stubs](docs/decisions/0002-development-attestation.md)
+- [Historical development attestation stub](docs/decisions/0002-development-attestation.md)
 - [Foreground BLE density scan](docs/decisions/0003-foreground-ble-density-scan.md)
 - [DEV-15 Solana Groth16 verification spike](docs/dev15-solana-groth16.md)
 - [DEV-16 observation submission spike](docs/dev16-observation-submit.md)
+- [DEV-17 Gate 1 decision](docs/gates/dev17-gate1.md)
+- [DEV-18 iPhone App Attest spike](apps/ios/AppAttestSpike/README.md)
+- [DEV-19 App Attest server verification](docs/dev19-app-attest-server.md)
 
 ## Contributing
 
