@@ -1,0 +1,69 @@
+name: ESP32 firmware
+
+on:
+  pull_request:
+    paths:
+      - 'firmware/esp32/**'
+      - '.github/workflows/firmware.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'firmware/esp32/**'
+      - '.github/workflows/firmware.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  host-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install host test dependency
+        run: sudo apt-get update && sudo apt-get install -y libsodium-dev
+      - name: Test identity lifecycle and advertising encoding
+        run: |
+          cmake -S firmware/esp32/tests -B "$RUNNER_TEMP/firmware-tests"
+          cmake --build "$RUNNER_TEMP/firmware-tests"
+          ctest --test-dir "$RUNNER_TEMP/firmware-tests" --output-on-failure
+
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    container: espressif/idf:v5.5.1
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [esp32c3, esp32s3]
+        profile: [development, protected]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Compile only (never flash or burn eFuses)
+        shell: bash
+        working-directory: firmware/esp32
+        env:
+          FIRMWARE_TARGET: ${{ matrix.target }}
+          FIRMWARE_PROFILE: ${{ matrix.profile }}
+        run: |
+          set -euo pipefail
+          # The container user differs from the checkout owner. Trust only this checkout.
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          . "$IDF_PATH/export.sh"
+          test "$(git -C "$IDF_PATH" rev-parse HEAD)" = fcae32885b0296b32044cb99ecbdc50d98dddb83
+          defaults=sdkconfig.defaults
+          if [[ "$FIRMWARE_PROFILE" == protected ]]; then
+            defaults='sdkconfig.defaults;sdkconfig.protected'
+          fi
+          idf.py -B build -D SDKCONFIG=sdkconfig.ci.local \
+            -D SDKCONFIG_DEFAULTS="$defaults" set-target "$FIRMWARE_TARGET"
+          idf.py -B build -D SDKCONFIG=sdkconfig.ci.local build size
+          if [[ "$FIRMWARE_PROFILE" == protected ]]; then
+            for option in PATHNOD_REQUIRE_ENCRYPTED_STORAGE SECURE_FLASH_ENC_ENABLED \
+              SECURE_FLASH_REQUIRE_ALREADY_ENABLED NVS_ENCRYPTION NVS_SEC_KEY_PROTECT_USING_FLASH_ENC; do
+              grep -qx "CONFIG_${option}=y" sdkconfig.ci.local
+            done
+          fi
+          test -s "dependencies.${FIRMWARE_TARGET}.lock"
+          git diff --exit-code -- "dependencies.${FIRMWARE_TARGET}.lock"
