@@ -83,13 +83,17 @@ jobs:
           fi
           test -s "dependencies.${FIRMWARE_TARGET}.lock"
           git diff --exit-code -- "dependencies.${FIRMWARE_TARGET}.lock"
-      - name: Report application size budget
+      - name: Enforce complete application binary size budget
         shell: bash
         working-directory: firmware/esp32
         run: |
           set -euo pipefail
+          budget_bytes=1048576
+          test -s build/pathnod_device.bin
           size_bytes=$(stat -c %s build/pathnod_device.bin)
-          echo "Application binary: ${size_bytes} bytes. DEV-22 target: < 200000 bytes (bootloader/partitions excluded)." >> "$GITHUB_STEP_SUMMARY"
-          if (( size_bytes >= 200000 )); then
-            echo "::warning::DEV-22 size target is not met: ${size_bytes} >= 200000 bytes. A passing build is not full DEV-22 acceptance."
+          echo "Complete application .bin: ${size_bytes} bytes. DEV-22 limit: <= ${budget_bytes} bytes (1 MiB), for every supported target/profile. Includes image headers, segments, padding and trailer; excludes bootloader, partition table and NVS." >> "$GITHUB_STEP_SUMMARY"
+          echo "Revisit this budget when defining the OTA partition layout. Passing CI does not validate the hardware quota or interrupted NVS commits." >> "$GITHUB_STEP_SUMMARY"
+          if (( size_bytes > budget_bytes )); then
+            echo "::error::DEV-22 application binary exceeds the 1 MiB limit: ${size_bytes} > ${budget_bytes} bytes."
+            exit 1
           fi
