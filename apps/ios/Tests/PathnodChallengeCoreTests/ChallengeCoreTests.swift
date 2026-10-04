@@ -117,7 +117,7 @@ final class ChallengeCoreTests: XCTestCase {
             let wire = try session.beginChallenge(
                 nonce: nonce, observationEpoch: 2,
                 observationHint: Data(repeating: 0, count: 8),
-                startedAt: Double(attempt)
+                startedAt: Double(attempt * 3)
             )
             XCTAssertEqual(wire.count, 44)
             let challenge = try DeviceProtocolV0.Challenge(
@@ -126,7 +126,7 @@ final class ChallengeCoreTests: XCTestCase {
             )
             let response = try signedResponse(challenge: challenge, counter: UInt32(attempt))
             guard case let .verified(result) = try session.receive(
-                response, at: Double(attempt) + Double(attempt) / 100,
+                response, at: Double(attempt * 3) + Double(attempt) / 100,
                 via: .notification
             ) else { return XCTFail("Expected a verified response") }
             XCTAssertEqual(result.attempt, attempt)
@@ -136,7 +136,7 @@ final class ChallengeCoreTests: XCTestCase {
         XCTAssertEqual(session.medianNotificationRTTMilliseconds!, 20, accuracy: 0.001)
         XCTAssertThrowsError(try session.beginChallenge(
             nonce: Data(repeating: 4, count: 32), observationEpoch: 2,
-            observationHint: Data(repeating: 0, count: 8), startedAt: 4
+            observationHint: Data(repeating: 0, count: 8), startedAt: 12
         ))
     }
 
@@ -148,44 +148,44 @@ final class ChallengeCoreTests: XCTestCase {
             observationHint: hint
         )
         _ = try session.beginChallenge(nonce: first.nonce, observationEpoch: 2,
-                                       observationHint: hint, startedAt: 1)
+                                       observationHint: hint, startedAt: 3)
         let oldResponse = try signedResponse(challenge: first, counter: 1)
-        _ = try session.receive(oldResponse, at: 1.1, via: .notification)
+        _ = try session.receive(oldResponse, at: 3.1, via: .notification)
 
         let second = try DeviceProtocolV0.Challenge(
             nonce: Data(repeating: 2, count: 32), observationEpoch: 2,
             observationHint: hint
         )
         _ = try session.beginChallenge(nonce: second.nonce, observationEpoch: 2,
-                                       observationHint: hint, startedAt: 2)
+                                       observationHint: hint, startedAt: 6)
         guard case .ignoredDuplicate = try session.receive(
-            oldResponse, at: 2.01, via: .notification
+            oldResponse, at: 6.01, via: .notification
         ) else { return XCTFail("Old response must be ignored") }
         XCTAssertEqual(session.results.count, 1)
         XCTAssertThrowsError(try session.receive(
             try signedResponse(challenge: first, counter: 2),
-            at: 2.02, via: .notification
+            at: 6.02, via: .notification
         )) {
             XCTAssertEqual($0 as? DeviceProtocolV0.ProtocolError, .invalidSignature)
         }
         let valid = try signedResponse(challenge: second, counter: 3)
-        _ = try session.receive(valid, at: 2.2, via: .readFallback)
+        _ = try session.receive(valid, at: 6.2, via: .readFallback)
         XCTAssertEqual(session.results.last?.transport, .readFallback)
         XCTAssertThrowsError(try session.beginChallenge(
-            nonce: second.nonce, observationEpoch: 2, observationHint: hint, startedAt: 3
+            nonce: second.nonce, observationEpoch: 2, observationHint: hint, startedAt: 9
         )) {
             XCTAssertEqual($0 as? ChallengeSession.SessionError, .reusedNonce)
         }
         _ = try session.beginChallenge(
             nonce: Data(repeating: 3, count: 32), observationEpoch: 2,
-            observationHint: hint, startedAt: 3
+            observationHint: hint, startedAt: 9
         )
         let third = try DeviceProtocolV0.Challenge(
             nonce: Data(repeating: 3, count: 32), observationEpoch: 2,
             observationHint: hint
         )
         _ = try session.receive(try signedResponse(challenge: third, counter: 4),
-                                at: 3.3, via: .notification)
+                                at: 9.3, via: .notification)
         XCTAssertNil(session.medianNotificationRTTMilliseconds)
     }
 
@@ -222,6 +222,112 @@ final class ChallengeCoreTests: XCTestCase {
             observationHint: challenge.observationHint, startedAt: 11
         )) {
             XCTAssertEqual($0 as? ChallengeSession.SessionError, .interrupted)
+        }
+    }
+
+    private func infoData(capabilities: UInt32) -> Data {
+        var data = infoData()
+        data.replaceSubrange(34..<38, with: bytes(capabilities))
+        return data
+    }
+
+    private func run(
+        _ session: inout ChallengeSession, nonce: UInt8, at time: Double, counter: UInt32
+    ) throws -> ChallengeSession.Receipt {
+        let hint = Data(repeating: 0, count: 8)
+        _ = try session.beginChallenge(
+            nonce: Data(repeating: nonce, count: 32), observationEpoch: 0,
+            observationHint: hint, startedAt: time
+        )
+        let challenge = try DeviceProtocolV0.Challenge(
+            nonce: Data(repeating: nonce, count: 32), observationEpoch: 0, observationHint: hint
+        )
+        return try session.receive(
+            try signedResponse(challenge: challenge, counter: counter),
+            at: time + 0.05, via: .notification
+        )
+    }
+
+    func testChallengesArePacedForTheDeviceRateLimit() throws {
+        var session = ChallengeSession(info: try .init(wireData: infoData()))
+        XCTAssertNil(session.nextChallengeAllowedAt)
+        XCTAssertEqual(ChallengeSession.defaultChallengeSpacingSeconds, 2.25, accuracy: 0.001)
+        _ = try run(&session, nonce: 1, at: 10, counter: 1)
+        XCTAssertEqual(session.nextChallengeAllowedAt!, 12.25, accuracy: 0.001)
+        // The spacing is measured between writes, so the RTT does not count towards it.
+        XCTAssertThrowsError(try run(&session, nonce: 2, at: 12.2, counter: 2)) {
+            XCTAssertEqual($0 as? ChallengeSession.SessionError, .challengeTooSoon)
+        }
+        XCTAssertFalse(session.hasPendingChallenge)
+        guard case let .verified(result) = try run(&session, nonce: 2, at: 12.25, counter: 2) else {
+            return XCTFail("Expected a verified response")
+        }
+        XCTAssertEqual(result.roundTripMilliseconds, 50, accuracy: 0.001)
+        XCTAssertEqual(session.nextChallengeAllowedAt!, 14.5, accuracy: 0.001)
+        XCTAssertThrowsError(try run(&session, nonce: 3, at: 11, counter: 3)) {
+            XCTAssertEqual($0 as? ChallengeSession.SessionError, .invalidClock)
+        }
+    }
+
+    func testCounterMustIncreaseWhenTheDeviceClaimsIt() throws {
+        // DEV-22 firmware: monotonic counter (bit 1) and rate limit (bit 3).
+        let info = try DeviceProtocolV0.Info(wireData: infoData(capabilities: 0x0a))
+        XCTAssertEqual(info.capabilitySet, [.monotonicCounter, .challengeRateLimit])
+        XCTAssertEqual(info.capabilitySet.names, ["monotonic counter", "challenge rate limit"])
+
+        var repeated = ChallengeSession(info: info)
+        _ = try run(&repeated, nonce: 1, at: 0, counter: 65)
+        XCTAssertThrowsError(try run(&repeated, nonce: 2, at: 3, counter: 65)) {
+            XCTAssertEqual($0 as? ChallengeSession.SessionError, .nonIncreasingCounter)
+        }
+        XCTAssertEqual(repeated.results.count, 1)
+
+        var lower = ChallengeSession(info: info)
+        _ = try run(&lower, nonce: 1, at: 0, counter: 7)
+        XCTAssertThrowsError(try run(&lower, nonce: 2, at: 3, counter: 6))
+
+        var zero = ChallengeSession(info: info)
+        XCTAssertThrowsError(try run(&zero, nonce: 1, at: 0, counter: 0)) {
+            XCTAssertEqual($0 as? ChallengeSession.SessionError, .nonIncreasingCounter)
+        }
+
+        // Gaps are expected after a reboot or a reservation block boundary.
+        var gaps = ChallengeSession(info: info)
+        for (index, counter) in [UInt32(63), 64, 129].enumerated() {
+            _ = try run(&gaps, nonce: UInt8(index + 1), at: Double(index * 3), counter: counter)
+        }
+        XCTAssertEqual(gaps.results.map(\.deviceCounter), [63, 64, 129])
+
+        // Without capability bit 1 the counter is informational (macOS simulator).
+        var simulator = ChallengeSession(info: try .init(wireData: infoData()))
+        _ = try run(&simulator, nonce: 1, at: 0, counter: 5)
+        _ = try run(&simulator, nonce: 2, at: 3, counter: 5)
+        XCTAssertEqual(simulator.results.count, 2)
+    }
+
+    func testAdvertisedDeviceIDPrefixMatchesInfo() throws {
+        let info = try DeviceProtocolV0.Info(wireData: infoData())
+        let expected = Data(SHA256.hash(
+            data: Data("Pathnod/device/v0".utf8) + key.publicKey.rawRepresentation
+        ))
+        XCTAssertEqual(DeviceProtocolV0.deviceIDDomain.count, 17)
+        XCTAssertEqual(info.deviceID, expected)
+        XCTAssertEqual(
+            try DeviceProtocolV0.checkAdvertisedIdentity(serviceData: expected.prefix(8), info: info),
+            .matched
+        )
+        XCTAssertEqual(
+            try DeviceProtocolV0.checkAdvertisedIdentity(serviceData: nil, info: info),
+            .notAdvertised
+        )
+        var altered = Data(expected.prefix(8))
+        altered[7] ^= 1
+        for serviceData in [altered, Data(expected.prefix(7)), Data(expected.prefix(9)), Data()] {
+            XCTAssertThrowsError(try DeviceProtocolV0.checkAdvertisedIdentity(
+                serviceData: serviceData, info: info
+            )) {
+                XCTAssertEqual($0 as? DeviceProtocolV0.ProtocolError, .deviceIDMismatch)
+            }
         }
     }
 }

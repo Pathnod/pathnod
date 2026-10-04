@@ -207,9 +207,10 @@ pending hardware discovery/persistence checks.
 1. Read INFO: capability bytes must be `00 00 00 0a`. Verify each response with
    the Node script, including its nonzero counter.
 2. Send three different nonces, each at least two seconds apart. Signatures must
-   verify and counters must increase. The existing DEV-10 ChallengeScan app sends
-   challenges immediately; its pacing must be adapted for DEV-23, or use an ATT
-   test client with controlled timing. Do not disable firmware limits for the demo.
+   verify and counters must increase. Since DEV-23 the ChallengeScan app spaces
+   challenges by 2.25 s ([DEV-23 runbook](../../docs/dev23-esp32-iphone-rtt.md));
+   an ATT test client with controlled timing also works. Do not disable firmware
+   limits for the demo.
 3. Retry a nonce after two seconds, with changed epoch/hint, and after reconnect:
    all must fail while cached. Retry after ten minutes: it may succeed within quota.
 4. Send a fresh challenge before two seconds: it must fail. Reconnect rapidly and

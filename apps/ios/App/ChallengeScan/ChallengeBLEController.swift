@@ -15,10 +15,39 @@ protocol ChallengeCentral: AnyObject {
 
 extension CBCentralManager: ChallengeCentral {}
 
+/// What the iPhone learned about the connected device, for the DEV-23 record.
+struct DeviceSummary: Equatable {
+    let deviceIDPrefix: String
+    let advertisedIdentity: DeviceProtocolV0.AdvertisedIdentity
+    let capabilities: UInt32
+    let capabilityNames: [String]
+    /// Hex protocol hint, or `nil` when it is all zero.
+    let protocolHint: String?
+    /// Largest ATT write payload (ATT MTU minus 3) negotiated by iOS.
+    let maximumWriteLength: Int
+
+    init(info: DeviceProtocolV0.Info, advertisedIdentity: DeviceProtocolV0.AdvertisedIdentity,
+         maximumWriteLength: Int) {
+        deviceIDPrefix = info.deviceID.prefix(8).hexString
+        self.advertisedIdentity = advertisedIdentity
+        capabilities = info.capabilities
+        capabilityNames = info.capabilitySet.names
+        protocolHint = info.protocolHint.allSatisfy { $0 == 0 } ? nil : info.protocolHint.hexString
+        self.maximumWriteLength = maximumWriteLength
+    }
+
+    var capabilitiesHex: String { String(format: "0x%08x", capabilities) }
+}
+
+extension Data {
+    var hexString: String { map { String(format: "%02x", $0) }.joined() }
+}
+
 @MainActor
 final class ChallengeBLEController: NSObject, ObservableObject,
     @preconcurrency CBCentralManagerDelegate, @preconcurrency CBPeripheralDelegate {
-    @Published private(set) var status = "Ready to scan for the Pathnod simulator."
+    @Published private(set) var status = "Ready to scan for a Pathnod device."
+    @Published private(set) var device: DeviceSummary?
     @Published private(set) var results: [ChallengeResult] = []
     @Published private(set) var medianNotificationRTTMilliseconds: Double?
     @Published private(set) var errorMessage: String?
@@ -26,8 +55,14 @@ final class ChallengeBLEController: NSObject, ObservableObject,
 
     private enum Stage {
         case idle, waitingForRadio, scanning, connecting, services, characteristics
-        case info, subscribing, challenge, readFallback, finished, failed, interrupted
+        case info, subscribing, pacing, challenge, readFallback, finished, failed, interrupted
     }
+
+    /// Service Data arrives in the ESP32 scan response, which can be reported in a
+    /// later discovery callback than the advertisement itself. The firmware
+    /// advertises at 1 Hz, so a missed scan response costs about one second; one
+    /// second of grace was not enough on hardware. Three covers ~3 advertising events.
+    static let serviceDataGraceSeconds: TimeInterval = 3
 
     private let serviceUUID = CBUUID(string: DeviceProtocolV0.serviceUUID)
     private let infoUUID = CBUUID(string: DeviceProtocolV0.infoUUID)
@@ -42,7 +77,10 @@ final class ChallengeBLEController: NSObject, ObservableObject,
     private var challengeCharacteristic: CBCharacteristic?
     private var responseCharacteristic: CBCharacteristic?
     private var session: ChallengeSession?
+    private var advertisedServiceData: Data?
     private var timeout: Timer?
+    private var discoveryGrace: Timer?
+    private var pacing: Timer?
     private var isSceneActive = true
 
     init(makeCentral: @escaping CentralFactory = {
@@ -52,13 +90,38 @@ final class ChallengeBLEController: NSObject, ObservableObject,
         super.init()
     }
 
+    /// Plain-text record of the last session, for the DEV-23 runbook.
+    var report: String {
+        var lines = ["Pathnod S1 challenge session"]
+        if let device {
+            lines.append("device_id prefix: \(device.deviceIDPrefix)")
+            lines.append("advertised ID: \(device.advertisedIdentity == .matched ? "matches INFO" : "not advertised")")
+            lines.append("capabilities: \(device.capabilitiesHex)")
+            lines.append("protocol hint: \(device.protocolHint ?? "zero")")
+            lines.append("ATT MTU: \(device.maximumWriteLength + 3)")
+        }
+        for result in results {
+            let transport = result.transport == .notification ? "notification" : "read fallback"
+            lines.append(String(
+                format: "challenge %d: %.1f ms, %@, counter %u",
+                result.attempt, result.roundTripMilliseconds, transport, result.deviceCounter
+            ))
+        }
+        if let medianNotificationRTTMilliseconds {
+            lines.append(String(format: "median notification RTT: %.1f ms", medianNotificationRTTMilliseconds))
+        }
+        return lines.joined(separator: "\n")
+    }
+
     func start() {
         guard !isRunning, isSceneActive else { return }
         stopConnection()
         results = []
+        device = nil
         medianNotificationRTTMilliseconds = nil
         errorMessage = nil
         session = nil
+        advertisedServiceData = nil
         isRunning = true
         stage = .waitingForRadio
         status = "Checking Bluetooth…"
@@ -105,7 +168,11 @@ final class ChallengeBLEController: NSObject, ObservableObject,
             guard stage == .waitingForRadio, isSceneActive else { return }
             stage = .scanning
             status = "Scanning for the provisional Pathnod service…"
-            central?.scanForPeripherals(withServices: [serviceUUID], options: nil)
+            // Duplicates let a later scan response deliver the ESP32 Service Data.
+            central?.scanForPeripherals(
+                withServices: [serviceUUID],
+                options: [CBCentralManagerScanOptionAllowDuplicatesKey: true]
+            )
             setTimeout(15)
         case .unknown, .resetting:
             if stage != .waitingForRadio {
@@ -133,7 +200,7 @@ final class ChallengeBLEController: NSObject, ObservableObject,
                         at: ProcessInfo.processInfo.systemUptime, after: seconds
                     )
                 }
-                self.fail("The Bluetooth exchange timed out. Try again with the simulator nearby.")
+                self.fail("The Bluetooth exchange timed out. Try again with the device nearby.")
             }
         }
     }
@@ -141,6 +208,10 @@ final class ChallengeBLEController: NSObject, ObservableObject,
     private func stopConnection() {
         timeout?.invalidate()
         timeout = nil
+        discoveryGrace?.invalidate()
+        discoveryGrace = nil
+        pacing?.invalidate()
+        pacing = nil
         central?.stopScan()
         if let peripheral, peripheral.state != .disconnected {
             central?.cancelPeripheralConnection(peripheral)
@@ -178,6 +249,31 @@ final class ChallengeBLEController: NSObject, ObservableObject,
             throw NSError(domain: "PathnodChallengeScan", code: 1)
         }
         return Data(bytes)
+    }
+
+    /// Waits until the device's per-connection rate limit allows the next write.
+    /// The wait happens before t0, so it is never part of the measured RTT.
+    private func scheduleNextChallenge() {
+        guard let session else {
+            fail("The challenge session is incomplete.")
+            return
+        }
+        let now = ProcessInfo.processInfo.systemUptime
+        guard let allowedAt = session.nextChallengeAllowedAt, allowedAt > now else {
+            sendNextChallenge()
+            return
+        }
+        timeout?.invalidate()
+        timeout = nil
+        stage = .pacing
+        status = "Waiting for the device rate limit before challenge \(session.results.count + 1) of 3…"
+        pacing?.invalidate()
+        pacing = Timer.scheduledTimer(withTimeInterval: allowedAt - now, repeats: false) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, self.isRunning, self.stage == .pacing else { return }
+                self.scheduleNextChallenge()
+            }
+        }
     }
 
     private func sendNextChallenge() {
@@ -232,8 +328,10 @@ final class ChallengeBLEController: NSObject, ObservableObject,
                 return
             case let .verified(result):
                 results.append(result)
-                if session.isComplete { finish() } else { sendNextChallenge() }
+                if session.isComplete { finish() } else { scheduleNextChallenge() }
             }
+        } catch ChallengeSession.SessionError.nonIncreasingCounter {
+            fail("The device counter did not increase although the device claims a monotonic counter.")
         } catch {
             fail("The response did not verify for the current challenge (\(error)).")
         }
@@ -250,13 +348,36 @@ final class ChallengeBLEController: NSObject, ObservableObject,
         rssi RSSI: NSNumber
     ) {
         guard stage == .scanning else { return }
-        central.stopScan()
+        let serviceData = (advertisementData[CBAdvertisementDataServiceDataKey] as? [CBUUID: Data])?[serviceUUID]
+        if serviceData == nil {
+            // Wait briefly for a scan response from this candidate. The macOS
+            // simulator never sends one, so connect without it after the grace period.
+            guard self.peripheral == nil else { return }
+            self.peripheral = peripheral
+            discoveryGrace = Timer.scheduledTimer(
+                withTimeInterval: Self.serviceDataGraceSeconds, repeats: false
+            ) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    guard let self, self.stage == .scanning, let candidate = self.peripheral else { return }
+                    self.connect(candidate, serviceData: nil)
+                }
+            }
+            return
+        }
+        connect(peripheral, serviceData: serviceData)
+    }
+
+    private func connect(_ peripheral: CBPeripheral, serviceData: Data?) {
+        discoveryGrace?.invalidate()
+        discoveryGrace = nil
+        central?.stopScan()
+        advertisedServiceData = serviceData
         self.peripheral = peripheral
         peripheral.delegate = self
         stage = .connecting
-        status = "Connecting to the simulator…"
+        status = "Connecting to the device…"
         setTimeout(10)
-        central.connect(peripheral, options: nil)
+        central?.connect(peripheral, options: nil)
     }
 
     func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
@@ -271,7 +392,7 @@ final class ChallengeBLEController: NSObject, ObservableObject,
         _ central: CBCentralManager, didFailToConnect peripheral: CBPeripheral, error: Error?
     ) {
         if stage == .connecting, self.peripheral === peripheral {
-            fail("Could not connect to the simulator.")
+            fail("Could not connect to the device.")
         }
     }
 
@@ -280,7 +401,7 @@ final class ChallengeBLEController: NSObject, ObservableObject,
         error: Error?
     ) {
         if isRunning, self.peripheral === peripheral {
-            fail("The simulator disconnected before all three challenges were verified.")
+            fail("The device disconnected before all three challenges were verified.")
         }
     }
 
@@ -313,11 +434,11 @@ final class ChallengeBLEController: NSObject, ObservableObject,
               challengeCharacteristic.properties.contains(.write),
               responseCharacteristic.properties.contains(.read),
               responseCharacteristic.properties.contains(.notify) else {
-            fail("The simulator is missing a required read, write or notify characteristic.")
+            fail("The device is missing a required read, write or notify characteristic.")
             return
         }
         stage = .info
-        status = "Reading the simulator's public key…"
+        status = "Reading the device's public key…"
         setTimeout(10)
         peripheral.readValue(for: infoCharacteristic)
     }
@@ -333,7 +454,21 @@ final class ChallengeBLEController: NSObject, ObservableObject,
         }
         if characteristic.uuid == infoUUID, stage == .info {
             do {
-                session = ChallengeSession(info: try DeviceProtocolV0.Info(wireData: data))
+                let info = try DeviceProtocolV0.Info(wireData: data)
+                let identity: DeviceProtocolV0.AdvertisedIdentity
+                do {
+                    identity = try DeviceProtocolV0.checkAdvertisedIdentity(
+                        serviceData: advertisedServiceData, info: info
+                    )
+                } catch {
+                    fail("The advertised device ID does not match the public key read from INFO.")
+                    return
+                }
+                device = DeviceSummary(
+                    info: info, advertisedIdentity: identity,
+                    maximumWriteLength: peripheral.maximumWriteValueLength(for: .withoutResponse)
+                )
+                session = ChallengeSession(info: info)
                 guard let responseCharacteristic else {
                     fail("The response characteristic disappeared.")
                     return
@@ -343,7 +478,7 @@ final class ChallengeBLEController: NSObject, ObservableObject,
                 setTimeout(10)
                 peripheral.setNotifyValue(true, for: responseCharacteristic)
             } catch {
-                fail("The simulator returned invalid or unsupported INFO data.")
+                fail("The device returned invalid or unsupported INFO data.")
             }
         } else if characteristic.uuid == responseUUID {
             handleResponse(data, from: peripheral)
@@ -360,7 +495,7 @@ final class ChallengeBLEController: NSObject, ObservableObject,
             fail("Could not subscribe to signed responses.")
             return
         }
-        sendNextChallenge()
+        scheduleNextChallenge()
     }
 
     func peripheral(
@@ -369,6 +504,6 @@ final class ChallengeBLEController: NSObject, ObservableObject,
     ) {
         guard stage == .challenge || stage == .readFallback,
               self.peripheral === peripheral, characteristic.uuid == challengeUUID else { return }
-        if error != nil { fail("The simulator rejected the challenge write.") }
+        if error != nil { fail("The device rejected the challenge write.") }
     }
 }
