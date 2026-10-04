@@ -1,4 +1,6 @@
 import CoreBluetooth
+import CryptoKit
+import Foundation
 import PathnodChallengeCore
 import SwiftUI
 import Testing
@@ -9,6 +11,7 @@ import Testing
 private final class CentralDouble: ChallengeCentral {
     var state: CBManagerState
     var scannedServices: [CBUUID]?
+    var scanOptions: [String: Any]?
     var scanCount = 0
     var stopCount = 0
 
@@ -16,6 +19,7 @@ private final class CentralDouble: ChallengeCentral {
 
     func scanForPeripherals(withServices serviceUUIDs: [CBUUID]?, options: [String: Any]?) {
         scannedServices = serviceUUIDs
+        scanOptions = options
         scanCount += 1
     }
 
@@ -42,6 +46,10 @@ struct ChallengeScanAppTests {
         #expect(creations == 1)
         #expect(central.scanCount == 1)
         #expect(central.scannedServices == [CBUUID(string: DeviceProtocolV0.serviceUUID)])
+        // The ESP32 sends its device ID prefix in a scan response reported separately.
+        #expect(central.scanOptions?[CBCentralManagerScanOptionAllowDuplicatesKey] as? Bool == true)
+        // Wait for at least two further 1 Hz advertising events before giving up on it.
+        #expect(ChallengeBLEController.serviceDataGraceSeconds >= 2.5)
         #expect(controller.isRunning)
 
         controller.cancel()
@@ -99,5 +107,28 @@ struct ChallengeScanAppTests {
         let usage = Bundle.main.object(forInfoDictionaryKey: "NSBluetoothAlwaysUsageDescription") as? String
         #expect(usage?.contains("three signed challenges") == true)
         #expect(Bundle.main.object(forInfoDictionaryKey: "UIBackgroundModes") == nil)
+    }
+
+    @Test("The device summary decodes capabilities, a non-zero hint and the ID prefix")
+    func deviceSummary() throws {
+        func info(capabilities: UInt8, hint: Data) throws -> DeviceProtocolV0.Info {
+            var wire = Data([0, 1])
+            wire.append(Curve25519.Signing.PrivateKey().publicKey.rawRepresentation)
+            wire.append(contentsOf: [0, 0, 0, capabilities])
+            wire.append(hint)
+            return try DeviceProtocolV0.Info(wireData: wire)
+        }
+        let plain = try info(capabilities: 0x0a, hint: Data(repeating: 0, count: 32))
+        let summary = DeviceSummary(info: plain, advertisedIdentity: .matched, maximumWriteLength: 182)
+        #expect(summary.capabilitiesHex == "0x0000000a")
+        #expect(summary.capabilityNames == ["monotonic counter", "challenge rate limit"])
+        #expect(summary.protocolHint == nil)
+        #expect(summary.deviceIDPrefix == plain.deviceID.prefix(8).hexString)
+        #expect(summary.deviceIDPrefix.count == 16)
+
+        let emulated = try info(capabilities: 0x2a, hint: Data(0..<32))
+        let helium = DeviceSummary(info: emulated, advertisedIdentity: .notAdvertised, maximumWriteLength: 20)
+        #expect(helium.capabilityNames.last == "external identity")
+        #expect(helium.protocolHint == Data(0..<32).hexString)
     }
 }
