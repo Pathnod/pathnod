@@ -1,0 +1,6 @@
+# Demo only (Spec §2.6): INFO.protocol_hint carries this cNFT asset ID and
+# capability bit 5 is set. The board is not a Helium hotspot.
+# Placeholder until DEV-43 provides a devnet cNFT: SHA-256 of the ASCII string
+# "Pathnod/helium-emulation/demo-asset/v0", base58-encoded. It is not a real asset.
+CONFIG_PATHNOD_HELIUM_EMULATION=y
+CONFIG_PATHNOD_HELIUM_ASSET_ID="9Hx3f9WPF5DdxqYzf51i2zieCRLTrYr5iP2b4mLmnPkd"

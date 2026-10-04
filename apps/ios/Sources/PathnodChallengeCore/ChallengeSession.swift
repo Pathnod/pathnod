@@ -14,6 +14,11 @@ public struct ChallengeResult: Sendable {
 
 /// Runs three sequential exchanges using caller-provided monotonic timestamps.
 public struct ChallengeSession {
+    /// The device enforces two seconds between writes when they reach it. Radio
+    /// scheduling can shorten that gap on the device side, so add a margin.
+    public static let defaultChallengeSpacingSeconds =
+        DeviceProtocolV0.minimumChallengeIntervalSeconds + 0.25
+
     public enum SessionError: Error, Equatable {
         case challengeAlreadyPending
         case noPendingChallenge
@@ -22,6 +27,8 @@ public struct ChallengeSession {
         case invalidClock
         case interrupted
         case timedOut
+        case challengeTooSoon
+        case nonIncreasingCounter
     }
 
     public enum Receipt {
@@ -30,17 +37,27 @@ public struct ChallengeSession {
     }
 
     public let info: DeviceProtocolV0.Info
+    public let challengeSpacingSeconds: Double
     public private(set) var results: [ChallengeResult] = []
     public var isComplete: Bool { results.count == 3 }
     public var hasPendingChallenge: Bool { pending != nil }
+    /// Earliest monotonic time for the next write; `nil` before the first one.
+    public var nextChallengeAllowedAt: Double? {
+        lastStartedAt.map { $0 + challengeSpacingSeconds }
+    }
 
     private var pending: (challenge: DeviceProtocolV0.Challenge, startedAt: Double)?
+    private var lastStartedAt: Double?
     private var usedNonces: Set<Data> = []
     private var acceptedResponses: Set<Data> = []
     private var terminalError: SessionError?
 
-    public init(info: DeviceProtocolV0.Info) {
+    public init(
+        info: DeviceProtocolV0.Info,
+        challengeSpacingSeconds: Double = ChallengeSession.defaultChallengeSpacingSeconds
+    ) {
         self.info = info
+        self.challengeSpacingSeconds = challengeSpacingSeconds
     }
 
     public mutating func beginChallenge(
@@ -53,11 +70,18 @@ public struct ChallengeSession {
         guard !isComplete else { throw SessionError.alreadyComplete }
         guard pending == nil else { throw SessionError.challengeAlreadyPending }
         guard startedAt.isFinite else { throw SessionError.invalidClock }
+        if let lastStartedAt {
+            guard startedAt >= lastStartedAt else { throw SessionError.invalidClock }
+            guard startedAt - lastStartedAt >= challengeSpacingSeconds else {
+                throw SessionError.challengeTooSoon
+            }
+        }
         guard !usedNonces.contains(nonce) else { throw SessionError.reusedNonce }
         let challenge = try DeviceProtocolV0.Challenge(
             nonce: nonce, observationEpoch: observationEpoch, observationHint: observationHint
         )
         usedNonces.insert(nonce)
+        lastStartedAt = startedAt
         pending = (challenge, startedAt)
         return challenge.wireData()
     }
@@ -75,6 +99,12 @@ public struct ChallengeSession {
         }
         let response = try DeviceProtocolV0.Response(wireData: wireData)
         try DeviceProtocolV0.verify(response: response, challenge: pending.challenge, info: info)
+        // Spec §7.1 E_DEV_COUNTER applies when the device claims capability bit 1.
+        if info.capabilitySet.contains(.monotonicCounter) {
+            guard response.deviceCounter > (results.last?.deviceCounter ?? 0) else {
+                throw SessionError.nonIncreasingCounter
+            }
+        }
         let result = ChallengeResult(
             attempt: results.count + 1,
             roundTripMilliseconds: (receivedAt - pending.startedAt) * 1_000,

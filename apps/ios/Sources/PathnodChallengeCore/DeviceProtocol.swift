@@ -1,15 +1,20 @@
 import CryptoKit
 import Foundation
 
-/// Provisional DEV-09 UUIDs and wire format.
+/// Provisional Pathnod Spec §2 UUIDs and wire format (DEV-09 simulator, DEV-20+ ESP32).
 public enum DeviceProtocolV0 {
     public static let serviceUUID = "534F5645-4C00-0000-0000-000000000001"
     public static let infoUUID = "534F5645-4C00-0000-0000-000000000002"
     public static let challengeUUID = "534F5645-4C00-0000-0000-000000000003"
     public static let responseUUID = "534F5645-4C00-0000-0000-000000000004"
     public static let domain = Data("Pathnod/challenge/v0".utf8)
+    public static let deviceIDDomain = Data("Pathnod/device/v0".utf8)
     public static let challengeLength = 44
     public static let responseHeaderLength = 78
+    /// Spec §2.1: Service Data carries `device_id[0..8]`.
+    public static let advertisedDeviceIDPrefixLength = 8
+    /// Spec §2.3: at most one challenge every two seconds per connection.
+    public static let minimumChallengeIntervalSeconds = 2.0
 
     public enum ProtocolError: Error, Equatable {
         case malformedInfo
@@ -18,6 +23,38 @@ public enum DeviceProtocolV0 {
         case malformedResponse
         case unsupportedEvidence
         case invalidSignature
+        case deviceIDMismatch
+    }
+
+    /// Spec §2.2 capability bits.
+    public struct Capabilities: OptionSet, Sendable {
+        public let rawValue: UInt32
+        public init(rawValue: UInt32) { self.rawValue = rawValue }
+
+        public static let trustedClock = Capabilities(rawValue: 1 << 0)
+        public static let monotonicCounter = Capabilities(rawValue: 1 << 1)
+        public static let serviceEvidence = Capabilities(rawValue: 1 << 2)
+        public static let challengeRateLimit = Capabilities(rawValue: 1 << 3)
+        public static let secureElement = Capabilities(rawValue: 1 << 4)
+        public static let externalIdentity = Capabilities(rawValue: 1 << 5)
+
+        public var names: [String] {
+            [
+                (Self.trustedClock, "trusted clock"),
+                (Self.monotonicCounter, "monotonic counter"),
+                (Self.serviceEvidence, "service evidence"),
+                (Self.challengeRateLimit, "challenge rate limit"),
+                (Self.secureElement, "secure element"),
+                (Self.externalIdentity, "external identity"),
+            ].filter { contains($0.0) }.map(\.1)
+        }
+    }
+
+    /// Whether the advertised Service Data prefix was checked against INFO.
+    public enum AdvertisedIdentity: Equatable, Sendable {
+        case matched
+        /// The macOS simulator cannot advertise Service Data.
+        case notAdvertised
     }
 
     public struct Info: Sendable {
@@ -38,6 +75,26 @@ public enum DeviceProtocolV0 {
             capabilities = wireData.readBigEndian(34..<38, as: UInt32.self)
             protocolHint = wireData.subdata(in: 38..<70)
         }
+
+        public var capabilitySet: Capabilities { Capabilities(rawValue: capabilities) }
+        public var deviceID: Data { DeviceProtocolV0.deviceID(publicKey: publicKey) }
+    }
+
+    /// `device_id = SHA-256("Pathnod/device/v0" || K_dev)`.
+    public static func deviceID(publicKey: Data) -> Data {
+        Data(SHA256.hash(data: deviceIDDomain + publicKey))
+    }
+
+    /// Compares Service Data, when advertised, with the identity read from INFO.
+    public static func checkAdvertisedIdentity(
+        serviceData: Data?, info: Info
+    ) throws -> AdvertisedIdentity {
+        guard let serviceData else { return .notAdvertised }
+        guard serviceData.count == advertisedDeviceIDPrefixLength,
+              serviceData == info.deviceID.prefix(advertisedDeviceIDPrefixLength) else {
+            throw ProtocolError.deviceIDMismatch
+        }
+        return .matched
     }
 
     public struct Challenge: Equatable, Sendable {

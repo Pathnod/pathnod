@@ -23,11 +23,13 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install host test dependency
         run: sudo apt-get update && sudo apt-get install -y libsodium-dev
-      - name: Test identity lifecycle and advertising encoding
+      - name: Test identity, protocol, replay protection, durable counters and hint
         run: |
           cmake -S firmware/esp32/tests -B "$RUNNER_TEMP/firmware-tests"
           cmake --build "$RUNNER_TEMP/firmware-tests"
           ctest --test-dir "$RUNNER_TEMP/firmware-tests" --output-on-failure
+      - name: Test hardware quota harness verdicts without Bluetooth
+        run: python3 -m unittest discover -s firmware/esp32/tests -p test_hardware_quota.py
 
   build:
     runs-on: ubuntu-latest
@@ -37,7 +39,7 @@ jobs:
       fail-fast: false
       matrix:
         target: [esp32c3, esp32s3]
-        profile: [development, protected]
+        profile: [development, protected, helium]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Compile only (never flash or burn eFuses)
@@ -46,6 +48,7 @@ jobs:
         env:
           FIRMWARE_TARGET: ${{ matrix.target }}
           FIRMWARE_PROFILE: ${{ matrix.profile }}
+          COLUMNS: '180'
         run: |
           set -euo pipefail
           # The container user differs from the checkout owner. Trust only this checkout.
@@ -55,15 +58,42 @@ jobs:
           defaults=sdkconfig.defaults
           if [[ "$FIRMWARE_PROFILE" == protected ]]; then
             defaults='sdkconfig.defaults;sdkconfig.protected'
+          elif [[ "$FIRMWARE_PROFILE" == helium ]]; then
+            defaults='sdkconfig.defaults;sdkconfig.helium'
           fi
           idf.py -B build -D SDKCONFIG=sdkconfig.ci.local \
             -D SDKCONFIG_DEFAULTS="$defaults" set-target "$FIRMWARE_TARGET"
           idf.py -B build -D SDKCONFIG=sdkconfig.ci.local build size
+          idf.py -B build -D SDKCONFIG=sdkconfig.ci.local size-components > build/size-components.txt
+          idf.py -B build -D SDKCONFIG=sdkconfig.ci.local size-files > build/size-files.txt
+          cat build/size-components.txt >> "$GITHUB_STEP_SUMMARY"
+          cat build/size-files.txt
           if [[ "$FIRMWARE_PROFILE" == protected ]]; then
             for option in PATHNOD_REQUIRE_ENCRYPTED_STORAGE SECURE_FLASH_ENC_ENABLED \
               SECURE_FLASH_REQUIRE_ALREADY_ENABLED NVS_ENCRYPTION NVS_SEC_KEY_PROTECT_USING_FLASH_ENC; do
               grep -qx "CONFIG_${option}=y" sdkconfig.ci.local
             done
           fi
+          # Helium emulation is demo-only and must never leak into other profiles.
+          if [[ "$FIRMWARE_PROFILE" == helium ]]; then
+            grep -qx 'CONFIG_PATHNOD_HELIUM_EMULATION=y' sdkconfig.ci.local
+          elif grep -q '^CONFIG_PATHNOD_HELIUM_EMULATION=y' sdkconfig.ci.local; then
+            echo "::error::Helium emulation enabled outside the helium profile"
+            exit 1
+          fi
           test -s "dependencies.${FIRMWARE_TARGET}.lock"
           git diff --exit-code -- "dependencies.${FIRMWARE_TARGET}.lock"
+      - name: Enforce complete application binary size budget
+        shell: bash
+        working-directory: firmware/esp32
+        run: |
+          set -euo pipefail
+          budget_bytes=1048576
+          test -s build/pathnod_device.bin
+          size_bytes=$(stat -c %s build/pathnod_device.bin)
+          echo "Complete application .bin: ${size_bytes} bytes. DEV-22 limit: <= ${budget_bytes} bytes (1 MiB), for every supported target/profile. Includes image headers, segments, padding and trailer; excludes bootloader, partition table and NVS." >> "$GITHUB_STEP_SUMMARY"
+          echo "Revisit this budget when defining the OTA partition layout. Passing CI does not validate the hardware quota or interrupted NVS commits." >> "$GITHUB_STEP_SUMMARY"
+          if (( size_bytes > budget_bytes )); then
+            echo "::error::DEV-22 application binary exceeds the 1 MiB limit: ${size_bytes} > ${budget_bytes} bytes."
+            exit 1
+          fi

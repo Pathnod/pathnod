@@ -21,6 +21,7 @@ static const char *TAG = "pathnod";
 static pathnod_identity_t identity;
 static uint8_t address_type;
 static pathnod_session_t session;
+static pathnod_guard_t guard;
 static uint16_t response_handle;
 static const ble_uuid128_t service_uuid = BLE_UUID128_INIT(
     1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x4c, 0x45, 0x56, 0x4f, 0x53);
@@ -37,8 +38,8 @@ static int info_read(uint16_t conn, uint16_t attr,
 {
     (void)conn; (void)attr; (void)arg;
     if (ctxt->op != BLE_GATT_ACCESS_OP_READ_CHR) return BLE_ATT_ERR_READ_NOT_PERMITTED;
-    uint8_t info[70] = {0, 1}; // v0, Ed25519; no capabilities promised yet
-    memcpy(info + 2, identity.public_key, sizeof(identity.public_key));
+    uint8_t info[70];
+    pathnod_identity_info(&identity, info);
     return os_mbuf_append(ctxt->om, info, sizeof(info)) == 0
         ? 0 : BLE_ATT_ERR_INSUFFICIENT_RES;
 }
@@ -71,7 +72,7 @@ static int challenge_write(uint16_t conn, uint16_t attr,
         return BLE_ATT_ERR_INVALID_ATTR_VALUE_LEN;
     if (ble_hs_mbuf_to_flat(ctxt->om, challenge, sizeof(challenge), &length) != 0)
         return BLE_ATT_ERR_UNLIKELY;
-    if (pathnod_session_challenge(&session, conn, challenge, length) != ESP_OK)
+    if (pathnod_session_challenge(&session, conn, challenge, length, &guard, start) != ESP_OK)
         return BLE_ATT_ERR_UNLIKELY;
     if (session.subscribed) {
         uint16_t mtu = ble_att_mtu(conn);
@@ -88,7 +89,9 @@ static int challenge_write(uint16_t conn, uint16_t attr,
         }
     }
     int64_t elapsed = esp_timer_get_time() - start;
-    ESP_LOGI(TAG, "Challenge processing + notification enqueue: %lld us", (long long)elapsed);
+    // Nano printf omits 64-bit formats. Clamp diagnostics, not protocol counters.
+    uint32_t elapsed_us = elapsed > UINT32_MAX ? UINT32_MAX : (uint32_t)elapsed;
+    ESP_LOGI(TAG, "Challenge processing + notification enqueue: %u us", (unsigned)elapsed_us);
     if (elapsed >= 50000) ESP_LOGW(TAG, "DEV-21 50 ms processing target exceeded");
     return 0;
 }
@@ -182,7 +185,21 @@ void app_main(void)
     // Deliberately no nvs_flash_erase() fallback: that would destroy identity.
     ESP_ERROR_CHECK(nvs_flash_init());
     ESP_ERROR_CHECK(nimble_port_init());
-    ESP_ERROR_CHECK(pathnod_identity_init(&identity));
+    esp_err_t identity_result = pathnod_identity_init(&identity);
+#if CONFIG_PATHNOD_HELIUM_EMULATION
+    if (identity_result == ESP_ERR_INVALID_ARG)
+        ESP_LOGE(TAG, "Invalid PATHNOD_HELIUM_ASSET_ID: expected a non-zero 32-byte "
+                      "cNFT asset ID in canonical base58");
+#endif
+    ESP_ERROR_CHECK(identity_result);
+#if CONFIG_PATHNOD_HELIUM_EMULATION
+    ESP_LOGW(TAG, "DEMO ONLY: Helium emulation, INFO.protocol_hint = cNFT asset %s",
+             CONFIG_PATHNOD_HELIUM_ASSET_ID);
+    ESP_LOGW(TAG, "This board is not a Helium hotspot; control of the asset is not proven");
+#endif
+    ESP_LOGI(TAG, "Guard: %u nonces, %u RAM bytes; durable counter blocks of %u",
+             (unsigned)PATHNOD_NONCE_CAPACITY, (unsigned)sizeof(guard),
+             (unsigned)PATHNOD_COUNTER_RESERVATION);
 #if CONFIG_PATHNOD_REQUIRE_ENCRYPTED_STORAGE
     ESP_LOGI(TAG, "Identity loaded with flash and NVS encryption required");
 #else

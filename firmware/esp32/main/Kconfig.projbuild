@@ -5,4 +5,20 @@ config PATHNOD_REQUIRE_ENCRYPTED_STORAGE
     help
         Protected profile only. Enabling flash encryption can irreversibly
         program eFuses on first boot. Never flash this profile without review.
+
+config PATHNOD_HELIUM_EMULATION
+    bool "Demo only: Helium emulation (cNFT asset ID in INFO.protocol_hint)"
+    default n
+    help
+        Spec 2.6 demo mode. INFO.protocol_hint carries the cNFT asset ID below
+        and capability bit 5 is set. This does not make the board a Helium
+        hotspot and proves no control of the asset (see register_device).
+
+config PATHNOD_HELIUM_ASSET_ID
+    string "Helium cNFT asset ID (base58, 32 bytes)"
+    depends on PATHNOD_HELIUM_EMULATION
+    default ""
+    help
+        The firmware refuses to start if this is empty, not canonical base58,
+        not exactly 32 bytes or all zero.
 endmenu
