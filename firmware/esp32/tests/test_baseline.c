@@ -314,6 +314,60 @@ static void nonce_for(uint8_t nonce[32], uint32_t index)
     for (size_t i = 0; i < 4; ++i) nonce[i] = (uint8_t)(index >> (8 * i));
 }
 
+static void test_power_cut_snapshots(void)
+{
+    // Persisted outcomes around reservation 65..128: old/new ceiling and a
+    // torn marker. This models reboot state, not real flash atomicity.
+    pathnod_identity_t identity;
+    uint8_t challenge[44] = {0}, response[78], public_key[32];
+    counter_exists = mode_exists = true; stored_mode = 1; stored_counter = 64;
+    assert(pathnod_identity_init(&identity) == ESP_OK);
+    memcpy(public_key, identity.public_key, sizeof(public_key));
+    for (int snapshot = 0; snapshot < 4; ++snapshot) {
+        counter_exists = snapshot != 2;
+        mode_exists = snapshot != 3;
+        stored_mode = 1;
+        stored_counter = snapshot == 0 ? 64 : 128;
+        esp_err_t result = pathnod_identity_init(&identity);
+        if (snapshot == 2) {
+            assert(result == ESP_ERR_INVALID_STATE); // Marker without ceiling.
+            memset(response, 0xff, sizeof(response));
+            assert(pathnod_identity_respond(challenge, 44, response) == ESP_ERR_INVALID_STATE);
+            for (size_t i = 0; i < sizeof(response); ++i) assert(response[i] == 0);
+        } else {
+            assert(result == ESP_OK);
+            assert(memcmp(public_key, identity.public_key, sizeof(public_key)) == 0);
+            assert(pathnod_identity_respond(challenge, 44, response) == ESP_OK);
+            assert(response_counter(response) == (snapshot == 0 ? 65 : 129));
+            assert(mode_exists && stored_mode == 1);
+        }
+    }
+}
+
+static void test_session_global_window(void)
+{
+    pathnod_identity_t identity;
+    pathnod_session_t session = {0};
+    pathnod_guard_t guard = {0};
+    uint8_t challenge[44] = {0};
+    counter_exists = mode_exists = false;
+    assert(pathnod_identity_init(&identity) == ESP_OK);
+    for (uint32_t i = 0; i < 30; ++i) {
+        pathnod_session_connect(&session, 4);
+        challenge[0] = (uint8_t)i;
+        assert(pathnod_session_challenge(&session, 4, challenge, 44, &guard,
+                                        (int64_t)i * 1000000) == ESP_OK);
+        pathnod_session_reset(&session);
+    }
+    pathnod_session_connect(&session, 4);
+    challenge[0] = 30;
+    assert(pathnod_session_challenge(&session, 4, challenge, 44, &guard, 59999999) == ESP_ERR_INVALID_STATE);
+    assert(!session.valid);
+    for (size_t i = 0; i < sizeof(session.response); ++i) assert(session.response[i] == 0);
+    assert(pathnod_session_challenge(&session, 4, challenge, 44, &guard, 60000000) == ESP_OK);
+    assert(response_counter(session.response) == 31); // Rejection never signs.
+}
+
 static void test_guard(void)
 {
     pathnod_guard_t guard = {0};
@@ -378,6 +432,8 @@ int main(void)
     test_challenge_response();
     test_session_persistence_failure();
     test_counter();
+    test_power_cut_snapshots();
+    test_session_global_window();
     test_guard();
     puts("DEV-20/21/22 identity, protocol, replay/rate and durable counter tests passed");
     return 0;
