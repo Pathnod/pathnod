@@ -234,6 +234,66 @@ CI reports binary bytes and warns when this target is exceeded. It intentionally
 keeps functional/build checks useful: **green build checks do not establish the
 DEV-22 size acceptance criterion**. The budget remains unresolved.
 
+The build now selects ESP-IDF's minimal component dependency closure and nano
+printf/scanf. Protocol fields, Ed25519, NVS encryption and BLE security are
+unchanged. Nano formatting has no 64-bit integer support: processing-time logs
+use a saturated 32-bit diagnostic value, not a change to signed counters.
+CI includes `size-components` in its summary and generates `size-files` to
+identify the actual contributors before further optimization.
+
+Compile-only measurements on 2026-10-04 with ESP-IDF v5.5.1:
+
+| Target | Development | Protected |
+| --- | ---: | ---: |
+| ESP32-C3 | 591,216 bytes | 594,400 bytes |
+| ESP32-S3 | 565,120 bytes | 568,064 bytes |
+
+All four builds pass, with unchanged dependency locks and protected-profile
+NVS/flash checks. Both host profiles pass normally and with AddressSanitizer /
+UndefinedBehaviorSanitizer. These images **still exceed 200,000 bytes**.
+Bluetooth controller/host and libsodium remain major linked contributors;
+do not strip cryptographic initialization or storage guards to claim compliance.
+Recheck hardware processing time and BLE behavior after these build changes.
+
+### Reproduce the global quota on hardware
+
+Use a development test board, reset it once before starting, and close other
+BLE clients. Do not reset the board during the trial: its quota is RAM-only.
+On a BLE-capable computer, install `bleak` in a disposable Python virtual
+environment and run (Python 3.10+, Node.js required):
+
+```sh
+python3 -m venv /tmp/pathnod-ble-quota-venv
+/tmp/pathnod-ble-quota-venv/bin/pip install bleak==1.1.1
+/tmp/pathnod-ble-quota-venv/bin/python firmware/esp32/tests/hardware_quota.py DEVICE_ADDRESS
+```
+
+On macOS, use the device's CoreBluetooth UUID, not its MAC address. The script
+reconnects for each fresh challenge to bypass the per-connection pacing limit,
+verifies the first 30 signatures and increasing counters, and records each
+attempt's monotonic elapsed time. The 31st attempt must be inside the original
+60-second window and rejected. It then checks recovery after window expiry
+without a skipped counter. Slow reconnects produce **inconclusive** (exit 2),
+not a pass. Capture the printed ATT error and correlate it with board logs:
+a transport failure alone is not proof of quota enforcement. This test has
+not been run on hardware by the implementation agent.
+
+### Reservation interruption validation
+
+Host tests cover old/new persisted ceilings at the 64-to-128 reservation,
+a persisted ceiling without its migration marker, and a marker with missing
+ceiling. The last case must fail closed; valid cases must preserve identity
+and emit 65 or 129, never a previously emitted value. These are simulated
+storage snapshots, not proof of actual flash power-loss behavior.
+
+On a disposable board, independently verify and record counters up to 64,
+interrupt power while attempting the next reservation, then reconnect and
+verify the first new signature and unchanged public key. Repeat around initial
+migration and subsequent reservation boundaries, without erasing NVS. Every
+counter observed before a cut must remain below the first one observed after
+recovery, or the device must refuse signing. Record board, firmware build,
+serial logs and when power was cut; a routine power cycle alone is insufficient.
+
 ## Protected storage profile — operator review required
 
 Flash encryption alone does **not** encrypt NVS values. The protected profile
