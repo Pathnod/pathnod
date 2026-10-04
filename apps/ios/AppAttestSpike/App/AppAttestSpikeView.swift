@@ -34,7 +34,7 @@ private final class TrialModel: ObservableObject {
                 keyDescription = "Reused key fingerprint \(fingerprint(record.keyID))"
                 attestationDescription = "Returned on a previous run"
             } else {
-                let hash = try freshChallengeHash()
+                let hash = try client.currentKey()?.retryClientDataHash ?? freshChallengeHash()
                 let attestation = try await client.attest(clientDataHash: hash)
                 keyDescription = "\(attestation.reusedKey ? "Reused" : "New") key fingerprint \(fingerprint(attestation.keyID))"
                 attestationDescription = "Returned \(attestation.object.count) bytes"

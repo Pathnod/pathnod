@@ -65,6 +65,12 @@ final class AppAttestClientTests: XCTestCase {
         XCTAssertEqual(service.generated, 0)
     }
 
+    func testExistingKeychainRecordDecodesWithoutRetryHash() throws {
+        let previousRecord = Data(#"{"keyID":"test-key","attestationReturned":true}"#.utf8)
+        let decoded = try JSONDecoder().decode(AppAttestKeyRecord.self, from: previousRecord)
+        XCTAssertEqual(decoded, AppAttestKeyRecord(keyID: "test-key", attestationReturned: true))
+    }
+
     func testFailedAttestationReusesKeyAndDistinctAssertionsSurviveClientRelaunch() async throws {
         let service = ServiceDouble()
         let store = StoreDouble()
@@ -78,17 +84,27 @@ final class AppAttestClientTests: XCTestCase {
         } catch {
             XCTAssertEqual((error as NSError).domain, DCError.errorDomain)
             XCTAssertEqual((error as NSError).code, DCError.serverUnavailable.rawValue)
-            XCTAssertEqual(store.record, AppAttestKeyRecord(keyID: "test-key", attestationReturned: false))
+            XCTAssertEqual(store.record, AppAttestKeyRecord(
+                keyID: "test-key", attestationReturned: false, retryClientDataHash: attestationHash
+            ))
         }
 
-        let attestation = try await firstClient.attest(clientDataHash: attestationHash)
+        let reopenedClient = AppAttestClient(service: service, store: store)
+        do {
+            _ = try await reopenedClient.attest(clientDataHash: Data(repeating: 9, count: 32))
+            XCTFail("Expected the original hash to be required")
+        } catch {
+            XCTAssertEqual(error as? AppAttestClientError, .retryRequiresSameClientDataHash)
+        }
+        XCTAssertEqual(service.attested.count, 1)
+
+        let attestation = try await reopenedClient.attest(clientDataHash: attestationHash)
         XCTAssertTrue(attestation.reusedKey)
         XCTAssertEqual(attestation.object, Data([0xA1]))
         XCTAssertEqual(service.generated, 1)
         XCTAssertEqual(service.attested.count, 2)
         XCTAssertEqual(store.record, AppAttestKeyRecord(keyID: "test-key", attestationReturned: true))
 
-        let reopenedClient = AppAttestClient(service: service, store: store)
         let firstHash = Data(repeating: 2, count: 32)
         let secondHash = Data(repeating: 3, count: 32)
         let firstAssertion = try await reopenedClient.assert(clientDataHash: firstHash)

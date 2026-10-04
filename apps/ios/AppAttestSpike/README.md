@@ -8,9 +8,9 @@ only a short hash of the key identifier and returned object lengths.
 
 `PathnodAppAttest` stores the opaque key identifier in this device's Keychain
 before asking for attestation. A `serverUnavailable` error keeps that identifier
-for a later retry; other attestation errors discard it so the next attempt
-creates a new key. Apple recommends retrying `serverUnavailable` with the same
-client data hash. The private key remains managed by App Attest. The stored
+and its client data hash for a later retry, including after relaunch; other
+attestation errors discard the record so the next attempt creates a new key.
+The private key remains managed by App Attest. The stored
 `attestationReturned` flag records only that Apple's API returned a nonempty
 object; it does not mean a server validated the attestation. The app reuses the
 key on later runs and requests two new assertions.
@@ -47,7 +47,7 @@ before any hardware assurance claim replaces the development stub.
 
 ## Evidence
 
-- Swift package tests: `swift test` passed on macOS, including all 5
+- Swift package tests: `swift test` passed on macOS, including all 6
   `AppAttestClientTests`.
 - Unsigned iOS Simulator build: succeeded. The Simulator does not provide a
   physical device App Attest result.

@@ -4,10 +4,12 @@ import Foundation
 public struct AppAttestKeyRecord: Codable, Equatable, Sendable {
     public let keyID: String
     public let attestationReturned: Bool
+    public let retryClientDataHash: Data?
 
-    public init(keyID: String, attestationReturned: Bool) {
+    public init(keyID: String, attestationReturned: Bool, retryClientDataHash: Data? = nil) {
         self.keyID = keyID
         self.attestationReturned = attestationReturned
+        self.retryClientDataHash = retryClientDataHash
     }
 }
 
@@ -19,6 +21,7 @@ public enum AppAttestClientError: Error, Equatable {
     case missingKey
     case attestationNotReturned
     case alreadyAttested
+    case retryRequiresSameClientDataHash
     case corruptStoredRecord
     case keychainFailure(Int32)
 }
@@ -100,8 +103,11 @@ public final class AppAttestClient {
     public func attest(clientDataHash: Data) async throws -> AppAttestAttestation {
         guard clientDataHash.count == 32 else { throw AppAttestClientError.invalidClientDataHash }
         let key = try await prepareKey()
-        if try store.load()?.attestationReturned == true {
-            throw AppAttestClientError.alreadyAttested
+        if let record = try store.load() {
+            if record.attestationReturned { throw AppAttestClientError.alreadyAttested }
+            if let retryHash = record.retryClientDataHash, retryHash != clientDataHash {
+                throw AppAttestClientError.retryRequiresSameClientDataHash
+            }
         }
 
         let object: Data
@@ -109,7 +115,13 @@ public final class AppAttestClient {
             object = try await service.attestKey(key.keyID, clientDataHash: clientDataHash)
         } catch {
             let failure = error as NSError
-            if failure.domain != DCError.errorDomain || failure.code != DCError.serverUnavailable.rawValue {
+            if failure.domain == DCError.errorDomain && failure.code == DCError.serverUnavailable.rawValue {
+                try store.save(AppAttestKeyRecord(
+                    keyID: key.keyID,
+                    attestationReturned: false,
+                    retryClientDataHash: clientDataHash
+                ))
+            } else {
                 try store.clear()
             }
             throw error
