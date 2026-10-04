@@ -1,4 +1,5 @@
 #include "identity.h"
+#include "base58.h"
 #include "sdkconfig.h"
 #include "esp_flash_encrypt.h"
 #include "nvs.h"
@@ -64,6 +65,16 @@ esp_err_t pathnod_identity_init(pathnod_identity_t *identity)
     if (!esp_flash_encryption_enabled()) return ESP_ERR_INVALID_STATE;
 #endif
     if (sodium_init() < 0) return ESP_FAIL;
+#if CONFIG_PATHNOD_HELIUM_EMULATION
+    // Demo only (Spec §2.6): the cNFT asset ID is fixed at build time and there
+    // is no runtime path to change it. Refuse to start rather than advertise a
+    // partial or zero hint, before any identity storage is touched.
+    if (pathnod_base58_decode32(CONFIG_PATHNOD_HELIUM_ASSET_ID, identity->protocol_hint) != ESP_OK ||
+        sodium_is_zero(identity->protocol_hint, sizeof(identity->protocol_hint))) {
+        sodium_memzero(identity, sizeof(*identity));
+        return ESP_ERR_INVALID_ARG;
+    }
+#endif
     nvs_handle_t handle;
     esp_err_t result = nvs_open("pathnod", NVS_READWRITE, &handle);
     if (result != ESP_OK) return result;
@@ -108,6 +119,7 @@ void pathnod_identity_info(const pathnod_identity_t *identity, uint8_t info[70])
     info[1] = 1; // Version 0, Ed25519.
     memcpy(info + 2, identity->public_key, 32);
     for (size_t i = 0; i < 4; ++i) info[34 + i] = (uint8_t)(PATHNOD_CAPABILITIES >> (24 - 8 * i));
+    memcpy(info + 38, identity->protocol_hint, 32);
 }
 
 esp_err_t pathnod_identity_respond(const uint8_t *challenge, size_t length,

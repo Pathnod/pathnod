@@ -3,14 +3,23 @@ project(pathnod_firmware_host_tests C)
 enable_testing()
 find_path(SODIUM_INCLUDE_DIR sodium.h REQUIRED)
 find_library(SODIUM_LIBRARY sodium REQUIRED)
-foreach(profile development protected)
-    add_executable(test_${profile} test_baseline.c ../main/identity.c ../main/advertising.c ../main/session.c ../main/guard.c)
+foreach(profile development protected helium helium_zero)
+    add_executable(test_${profile} test_baseline.c ../main/identity.c ../main/advertising.c
+        ../main/session.c ../main/guard.c ../main/base58.c)
     target_include_directories(test_${profile} PRIVATE stubs ../main "${SODIUM_INCLUDE_DIR}")
     target_link_libraries(test_${profile} PRIVATE "${SODIUM_LIBRARY}")
     target_compile_options(test_${profile} PRIVATE -Wall -Wextra -Werror -pedantic)
     target_compile_features(test_${profile} PRIVATE c_std_11)
     if(profile STREQUAL "protected")
         target_compile_definitions(test_${profile} PRIVATE CONFIG_PATHNOD_REQUIRE_ENCRYPTED_STORAGE=1)
+    elseif(profile STREQUAL "helium")
+        target_compile_definitions(test_${profile} PRIVATE CONFIG_PATHNOD_HELIUM_EMULATION=1
+            CONFIG_PATHNOD_HELIUM_ASSET_ID="TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA")
+    elseif(profile STREQUAL "helium_zero")
+        # Decodes, but to an all-zero hint: the firmware must refuse to start.
+        target_compile_definitions(test_${profile} PRIVATE CONFIG_PATHNOD_HELIUM_EMULATION=1
+            CONFIG_PATHNOD_HELIUM_ASSET_ID="11111111111111111111111111111111"
+            PATHNOD_TEST_REJECTED_ASSET=1)
     endif()
     add_test(NAME ${profile} COMMAND test_${profile})
 endforeach()

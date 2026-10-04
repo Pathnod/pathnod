@@ -185,7 +185,18 @@ void app_main(void)
     // Deliberately no nvs_flash_erase() fallback: that would destroy identity.
     ESP_ERROR_CHECK(nvs_flash_init());
     ESP_ERROR_CHECK(nimble_port_init());
-    ESP_ERROR_CHECK(pathnod_identity_init(&identity));
+    esp_err_t identity_result = pathnod_identity_init(&identity);
+#if CONFIG_PATHNOD_HELIUM_EMULATION
+    if (identity_result == ESP_ERR_INVALID_ARG)
+        ESP_LOGE(TAG, "Invalid PATHNOD_HELIUM_ASSET_ID: expected a non-zero 32-byte "
+                      "cNFT asset ID in canonical base58");
+#endif
+    ESP_ERROR_CHECK(identity_result);
+#if CONFIG_PATHNOD_HELIUM_EMULATION
+    ESP_LOGW(TAG, "DEMO ONLY: Helium emulation, INFO.protocol_hint = cNFT asset %s",
+             CONFIG_PATHNOD_HELIUM_ASSET_ID);
+    ESP_LOGW(TAG, "This board is not a Helium hotspot; control of the asset is not proven");
+#endif
     ESP_LOGI(TAG, "Guard: %u nonces, %u RAM bytes; durable counter blocks of %u",
              (unsigned)PATHNOD_NONCE_CAPACITY, (unsigned)sizeof(guard),
              (unsigned)PATHNOD_COUNTER_RESERVATION);

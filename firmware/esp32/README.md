@@ -1,4 +1,4 @@
-# ESP32 BLE identity and hardened challenge/response (DEV-20 / DEV-21 / DEV-22)
+# ESP32 BLE identity and hardened challenge/response (DEV-20 / DEV-21 / DEV-22 / DEV-24)
 
 ESP-IDF **v5.5.1** (`fcae32885b0296b32044cb99ecbdc50d98dddb83`),
 NimBLE peripheral, ESP32-C3 / ESP32-S3, 4 MB flash assumed.
@@ -8,8 +8,10 @@ Confirm the board's chip, flash size and serial port before flashing.
 This implements discovery, persistent Ed25519 identity, GATT signing and DEV-22
 replay/rate protection with an NVS-backed monotonic counter.
 No trusted clock, secure element, non-exportable signing key, or relay resistance
-is claimed. INFO capabilities are **0x0000000a** (bits 1 and 3), in both profiles:
-flash/NVS encryption does not make a software Ed25519 key non-exportable.
+is claimed. INFO capabilities are **0x0000000a** (bits 1 and 3), in both storage
+profiles: flash/NVS encryption does not make a software Ed25519 key non-exportable.
+The demo-only Helium emulation build (DEV-24) adds bit 5 and a cNFT asset ID in
+`protocol_hint`; see [below](#dev-24-helium-emulation--demo-only).
 
 ## Build (development profile, no irreversible provisioning)
 
@@ -89,7 +91,8 @@ criterion. Do not claim background discovery or early prefix filtering has been
 validated until it is measured on an iPhone.
 
 INFO UUID `…0002`, Read: `version(1)=0 || curve(1)=1 || public_key(32) ||
-capabilities(4, big-endian)=0x0000000a || protocol_hint(32)=0`, total 70 bytes. A full characteristic
+capabilities(4, big-endian)=0x0000000a || protocol_hint(32)=0`, total 70 bytes (Helium
+emulation: `0x0000002a` and the configured asset ID). A full characteristic
 read must return all 70 bytes; MTU 185 is preferred, long reads are available.
 
 ## GATT contract (DEV-21 transport, DEV-22 counter/guards)
@@ -295,6 +298,48 @@ counter observed before a cut must remain below the first one observed after
 recovery, or the device must refuse signing. Record board, firmware build,
 serial logs and when power was cut; a routine power cycle alone is insufficient.
 
+## DEV-24 Helium emulation — demo only
+
+Spec §2.6 asks the reference firmware for a Helium emulation mode, for the demo
+only: `INFO.protocol_hint` carries a cNFT asset ID supplied at build time.
+
+- `CONFIG_PATHNOD_HELIUM_EMULATION` (default **n**) enables the mode, and
+  `CONFIG_PATHNOD_HELIUM_ASSET_ID` holds the asset ID in canonical base58 (Solana
+  alphabet, exactly 32 bytes). There is no runtime or GATT path to change it.
+- When enabled, INFO carries the 32 decoded bytes in `protocol_hint` and
+  capabilities **0x0000002a**: bit 5 (external identity, `protocol_hint` = DID/cNFT
+  reference) in addition to bits 1 and 3. Bit 5 only announces what the hint
+  contains. Control of the asset is proven by `register_device` with
+  `proof_of_control`, which sets `linked = true` on-chain (DEV-43).
+- With the mode disabled, INFO is byte-for-byte identical to DEV-22.
+- An empty, non-base58, non-canonical (extra leading `1`), wrong-length or
+  all-zero asset ID makes `pathnod_identity_init` return `ESP_ERR_INVALID_ARG`
+  before identity storage is opened. The firmware logs the reason and aborts at
+  every boot instead of advertising a partial or zero hint.
+- At boot the firmware logs `DEMO ONLY: Helium emulation` with the asset ID, and
+  that the board is not a Helium hotspot. Advertising, identity, signing, counter
+  and guards are unchanged; the hint is not part of the signed `DEV_MSG_V0`.
+
+`sdkconfig.helium` is an overlay on top of `sdkconfig.defaults`. Its asset ID is
+a **placeholder**, not a real asset: the base58 encoding of SHA-256 of the ASCII
+string `Pathnod/helium-emulation/demo-asset/v0`, i.e. `9Hx3f9WPF5DdxqYzf51i2zieCRLTrYr5iP2b4mLmnPkd`
+(hex `7b350763c0f402f77dc94d0a64a6f9c6911475cf92206035a54d7b26395dec22`).
+Replace it with the devnet cNFT once DEV-43 provides one.
+
+```sh
+idf.py -B build-c3-helium -D SDKCONFIG=sdkconfig.c3.helium.local \
+  -D 'SDKCONFIG_DEFAULTS=sdkconfig.defaults;sdkconfig.helium' set-target esp32c3
+idf.py -B build-c3-helium -D SDKCONFIG=sdkconfig.c3.helium.local build
+```
+
+Check it from the iPhone with the DEV-23 ChallengeScan app (or nRF Connect):
+INFO must show capabilities `00 00 00 2a` and the configured asset ID in hex as
+the protocol hint, and the three challenges must still verify. Never describe a
+board running this build as a real Helium hotspot.
+
+Task: [GitHub issue #50](https://github.com/Pathnod/pathnod/issues/50).
+Stack base: `feat/dev-22-esp32-replay-protection`.
+
 ## Protected storage profile — operator review required
 
 Flash encryption alone does **not** encrypt NVS values. The protected profile
@@ -349,6 +394,13 @@ DEV-21 adds a deterministic Node.js/OpenSSL interoperability signature vector,
 digest-vs-raw-message verification, mutations across every signed field, malformed
 challenge lengths, failed-init signing refusal and connection-state isolation.
 These tests use the real session/signing code, but not NimBLE or the BLE radio.
+
+DEV-24 adds two profiles. `helium` builds the tests with emulation enabled and
+checks capabilities `0x0000002a` and the decoded hint in INFO. `helium_zero` uses
+an asset ID that decodes to all zeros and checks that initialization is refused
+before any NVS access. All profiles run base58 vectors cross-checked with the
+`bs58` npm package: leading zero bytes, the 44-character maximum, wrong lengths,
+non-canonical leading `1`s and characters outside the alphabet.
 
 ## iPhone acceptance test (required to close DEV-20)
 
@@ -416,3 +468,25 @@ Protocol: [Pathnod Spec §1, §2.1, §2.4, §2.6](https://app.notion.com/p/Pathn
 - **Open acceptance items:** < 200 KB binary budget, real NVS power-interruption
   recovery, BLE 1 Hz observation, radio/MTU behavior, < 50 ms including reservation
   writes, and battery behavior. DEV-22 must not be marked fully validated yet.
+
+## DEV-24 validation record (2026-10-04)
+
+- Host tests pass in the development, protected, `helium` and `helium_zero`
+  profiles, including AddressSanitizer and UndefinedBehaviorSanitizer runs.
+- Before integrating DEV-22's later size optimizations, ESP-IDF v5.5.1 builds
+  passed for C3 and S3 with emulation off and on, and for the C3 protected
+  profile. Application sizes then were: C3 614,592 / helium 615,456 bytes;
+  S3 598,080 / helium 598,720 bytes; C3 protected 617,744 bytes. Dependency
+  lockfiles were unchanged. After integrating those optimizations, local C3
+  development and helium builds measure 588,592 and 589,488 bytes respectively.
+  Rebuild the S3 and protected profiles to measure their current sizes; the
+  DEV-22 < 200 KB budget remains unmet.
+- On the ESP32-C3 used for DEV-23 (development storage, no eFuse programmed), a
+  build with an invalid asset ID refused to start at every boot with the log
+  above and never advertised. The `sdkconfig.helium` build then logged the demo
+  warnings and kept the DEV-20 identity (device ID prefix `2b52d036962219b5`).
+- Two sessions from an iPhone 16 Pro (iOS 27.0) read capabilities `0x0000002a`
+  and protocol hint `7b350763…5dec22`, matched the advertised device ID and
+  verified six challenges (counters 257–262, median RTT 58.5 and 58.8 ms).
+  Firmware processing: 24.7 ms for the first challenge after boot, which
+  includes the counter reservation, then 15.4–15.5 ms.
