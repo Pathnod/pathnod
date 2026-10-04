@@ -5,6 +5,7 @@
 #include <sodium.h>
 #include "identity.h"
 #include "advertising.h"
+#include "base58.h"
 #include "nvs.h"
 #include "sdkconfig.h"
 #include "session.h"
@@ -163,8 +164,20 @@ static void test_challenge_response(void)
     uint8_t info[70];
     pathnod_identity_info(&identity, info);
     assert(info[0] == 0 && info[1] == 1 && memcmp(info + 2, identity.public_key, 32) == 0);
-    assert(info[34] == 0 && info[35] == 0 && info[36] == 0 && info[37] == 10);
+    assert(info[34] == 0 && info[35] == 0 && info[36] == 0);
+#if CONFIG_PATHNOD_HELIUM_EMULATION
+    // Bits 1, 3 and 5; the hint is the configured asset ID (SPL Token program ID).
+    assert(info[37] == 0x2a);
+    uint8_t asset[32];
+    assert(sodium_hex2bin(asset, 32,
+        "06ddf6e1d765a193d9cbe146ceeb79ac1cb485ed5f5b37913a8cf5857eff00a9",
+        64, NULL, NULL, NULL) == 0);
+    assert(memcmp(info + 38, asset, 32) == 0);
+    assert(memcmp(identity.protocol_hint, asset, 32) == 0);
+#else
+    assert(info[37] == 10);
     for (size_t i = 38; i < 70; ++i) assert(info[i] == 0);
+#endif
     assert(pathnod_identity_respond(challenge, 44, response) == ESP_OK);
     // Independent Node.js/OpenSSL Ed25519 vector (public test seed 00..1f).
     uint8_t expected_signature[64];
@@ -305,7 +318,11 @@ static void test_counter(void)
     assert(pathnod_identity_respond(challenge, 44, response) == ESP_ERR_INVALID_STATE);
     for (size_t i = 0; i < sizeof(response); ++i) assert(response[i] == 0);
     assert(pathnod_identity_init(&identity) == ESP_ERR_INVALID_STATE);
+#if CONFIG_PATHNOD_HELIUM_EMULATION
+    assert(PATHNOD_CAPABILITIES == ((1u << 1) | (1u << 3) | (1u << 5)));
+#else
     assert(PATHNOD_CAPABILITIES == ((1u << 1) | (1u << 3)));
+#endif
 }
 
 static void nonce_for(uint8_t nonce[32], uint32_t index)
@@ -371,14 +388,82 @@ static void test_guard(void)
     assert(pathnod_guard_accept(&guard, &connection, nonce, 30) == PATHNOD_GUARD_RATE);
 }
 
+static void expect_base58(const char *text, const char *hex)
+{
+    uint8_t decoded[32], expected[32];
+    assert(sodium_hex2bin(expected, 32, hex, 64, NULL, NULL, NULL) == 0);
+    assert(pathnod_base58_decode32(text, decoded) == ESP_OK);
+    assert(memcmp(decoded, expected, 32) == 0);
+}
+
+static void expect_base58_rejected(const char *text)
+{
+    uint8_t decoded[32];
+    memset(decoded, 0xa5, sizeof(decoded));
+    assert(pathnod_base58_decode32(text, decoded) != ESP_OK);
+    assert(sodium_is_zero(decoded, sizeof(decoded)));
+}
+
+static void test_base58(void)
+{
+    // Vectors cross-checked with the bs58 npm package.
+    expect_base58("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "06ddf6e1d765a193d9cbe146ceeb79ac1cb485ed5f5b37913a8cf5857eff00a9");
+    expect_base58("9Hx3f9WPF5DdxqYzf51i2zieCRLTrYr5iP2b4mLmnPkd", // sdkconfig.helium
+        "7b350763c0f402f77dc94d0a64a6f9c6911475cf92206035a54d7b26395dec22");
+    expect_base58("11awMgzRTpb4njZ2PyZchwTtj89BUwZmeoiM2yWuA9G", // two leading zero bytes
+        "0000a95eba335a104302cb62a72a9ff847e66bc57299f8315877661800e6df53");
+    expect_base58("JEKNVnkbo3jma5nREBBJCDoXFVeKkD56V3xKrvRmWxFG", // 44 characters
+        "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff");
+    expect_base58("11111111111111111111111111111111",
+        "0000000000000000000000000000000000000000000000000000000000000000");
+
+    expect_base58_rejected(NULL);
+    expect_base58_rejected("");
+    expect_base58_rejected("4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofL");  // 31 bytes
+    expect_base58_rejected("JJEfe6DcPM2ziB2vfUWDV6aHVerXRGkv3TcyvJUNGHZz"); // 33 bytes
+    expect_base58_rejected("1TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"); // extra leading zero
+    expect_base58_rejected("1111111111111111111111111111111");               // 31 zero bytes
+    expect_base58_rejected("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA1"); // too long
+    expect_base58_rejected("0okenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");  // '0' not in alphabet
+    expect_base58_rejected("OokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
+    expect_base58_rejected("IokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
+    expect_base58_rejected("lokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
+    expect_base58_rejected(" TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
+    expect_base58_rejected("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5D\xc3\xa9");
+    assert(pathnod_base58_decode32("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA", NULL)
+        == ESP_ERR_INVALID_ARG);
+}
+
+#if PATHNOD_TEST_REJECTED_ASSET
+static void test_rejected_asset(void)
+{
+    pathnod_identity_t identity;
+    memset(&identity, 0xa5, sizeof(identity));
+    assert(pathnod_identity_init(&identity) == ESP_ERR_INVALID_ARG);
+    // Refused before any identity storage is opened, created or read.
+    assert(opens == 0 && sets == 0 && commits == 0);
+    assert(sodium_is_zero((const unsigned char *)&identity, sizeof(identity)));
+    uint8_t challenge[44] = {0}, response[78];
+    assert(pathnod_identity_respond(challenge, 44, response) == ESP_ERR_INVALID_STATE);
+}
+#endif
+
 int main(void)
 {
+#if PATHNOD_TEST_REJECTED_ASSET
+    test_base58();
+    test_rejected_asset();
+    puts("DEV-24 rejected Helium asset test passed");
+    return 0;
+#endif
     test_identity();
     test_advertising();
     test_challenge_response();
     test_session_persistence_failure();
     test_counter();
     test_guard();
-    puts("DEV-20/21/22 identity, protocol, replay/rate and durable counter tests passed");
+    test_base58();
+    puts("DEV-20/21/22/24 identity, protocol, replay/rate, durable counter and hint tests passed");
     return 0;
 }
