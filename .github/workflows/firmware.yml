@@ -23,7 +23,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install host test dependency
         run: sudo apt-get update && sudo apt-get install -y libsodium-dev
-      - name: Test identity, protocol, replay protection and durable counters
+      - name: Test identity, protocol, replay protection, durable counters and hint
         run: |
           cmake -S firmware/esp32/tests -B "$RUNNER_TEMP/firmware-tests"
           cmake --build "$RUNNER_TEMP/firmware-tests"
@@ -37,7 +37,7 @@ jobs:
       fail-fast: false
       matrix:
         target: [esp32c3, esp32s3]
-        profile: [development, protected]
+        profile: [development, protected, helium]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Compile only (never flash or burn eFuses)
@@ -55,6 +55,8 @@ jobs:
           defaults=sdkconfig.defaults
           if [[ "$FIRMWARE_PROFILE" == protected ]]; then
             defaults='sdkconfig.defaults;sdkconfig.protected'
+          elif [[ "$FIRMWARE_PROFILE" == helium ]]; then
+            defaults='sdkconfig.defaults;sdkconfig.helium'
           fi
           idf.py -B build -D SDKCONFIG=sdkconfig.ci.local \
             -D SDKCONFIG_DEFAULTS="$defaults" set-target "$FIRMWARE_TARGET"
@@ -64,6 +66,13 @@ jobs:
               SECURE_FLASH_REQUIRE_ALREADY_ENABLED NVS_ENCRYPTION NVS_SEC_KEY_PROTECT_USING_FLASH_ENC; do
               grep -qx "CONFIG_${option}=y" sdkconfig.ci.local
             done
+          fi
+          # Helium emulation is demo-only and must never leak into other profiles.
+          if [[ "$FIRMWARE_PROFILE" == helium ]]; then
+            grep -qx 'CONFIG_PATHNOD_HELIUM_EMULATION=y' sdkconfig.ci.local
+          elif grep -q '^CONFIG_PATHNOD_HELIUM_EMULATION=y' sdkconfig.ci.local; then
+            echo "::error::Helium emulation enabled outside the helium profile"
+            exit 1
           fi
           test -s "dependencies.${FIRMWARE_TARGET}.lock"
           git diff --exit-code -- "dependencies.${FIRMWARE_TARGET}.lock"
