@@ -14,11 +14,13 @@ endpoint are not wired to this gate yet.
   validity dates and App Attest key usage, nonce certificate extension bound to
   the server challenge, SHA-256 public-key hash and credential ID against the
   key identifier, COSE key against the certificate, App ID `rpIdHash`, zero
-  counter, environment AAGUID, and allowed launch validation category.
+  counter, environment AAGUID, allowed launch validation category, and a bundle
+  version permitted by the server policy when present.
 - Assertion: strict CBOR shape, signature from the stored key over the nonce,
-  App ID `rpIdHash`, matching validation category and bundle version when
-  present, challenge binding, and a counter strictly greater than the stored
-  value. The counter update uses a compare-and-swap SQLite write.
+  App ID `rpIdHash`, matching validation category, a signed bundle version
+  allowed by the current server policy, challenge binding, and a counter
+  strictly greater than the stored value. The counter and latest authorized
+  bundle version use a compare-and-swap SQLite write.
 - Challenges expire after five minutes and are consumed on the first attempt,
   including failed attempts. A trial binds its two pending assertion challenges
   to the key only after successful attestation. Reusing a challenge or an old
@@ -28,7 +30,12 @@ The development policy used for the iPhone spike expects App ID
 `U5MCCC24G5.xyz.pathnod.appattestspike`, the development AAGUID, and launch
 validation category `3` (development-signed app). Production callers must
 provide their own exact App ID, production environment, and permitted launch
-categories. Development and production keys cannot cross those policies.
+categories and bundle versions. The spike allows no bundle version extension,
+matching the device evidence captured here. A nonempty `allowedBundleVersions`
+list requires an assertion or attestation to carry one of those signed values.
+The list can include both the current and previous release while clients update;
+the key remains enrolled across that update. Development and production keys
+cannot cross those policies.
 The development policy is refused when `NODE_ENV=production`.
 `AppAttestVerifier` is the stateless cryptographic component; callers must
 only pass it a key returned by a successful attestation and kept in trusted
@@ -98,6 +105,11 @@ The focused test suite passed with this local evidence, including tampered
 challenge, App ID, environment, validation category, certificate, signature,
 and repeated counter cases. The raw objects and SQLite database remain local
 and are not tracked by git.
+
+The default test suite also runs without device evidence. It verifies signed
+synthetic assertions, authorized version changes, signature and challenge
+tampering, counter replay, and a public certificate and nonce sample from
+[Apple's validation guide](https://developer.apple.com/documentation/devicecheck/attestation-object-validation-guide).
 
 ```sh
 PATHNOD_DEV19_EVIDENCE=/private/tmp/pathnod-dev19-evidence.json \

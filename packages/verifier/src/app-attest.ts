@@ -31,6 +31,7 @@ export interface AppAttestPolicy {
   readonly appID: string;
   readonly environment: AppAttestEnvironment;
   readonly allowedValidationCategories: readonly number[];
+  readonly allowedBundleVersions: readonly string[];
 }
 
 export interface VerifiedAppAttestKey {
@@ -203,7 +204,9 @@ export class AppAttestVerifier {
       (policy.environment !== "development" && policy.environment !== "production") ||
       (process.env.NODE_ENV === "production" && policy.environment === "development") ||
       !Array.isArray(policy.allowedValidationCategories) || policy.allowedValidationCategories.length === 0 ||
-      policy.allowedValidationCategories.some((value) => ![2, 3, 4, 5].includes(value))
+      policy.allowedValidationCategories.some((value) => ![2, 3, 4, 5].includes(value)) ||
+      !Array.isArray(policy.allowedBundleVersions) ||
+      policy.allowedBundleVersions.some((value) => typeof value !== "string" || value.length === 0)
     ) {
       fail("invalid_input");
     }
@@ -263,6 +266,7 @@ export class AppAttestVerifier {
     if (extensions.validationCategory !== undefined && !this.#policy.allowedValidationCategories.includes(extensions.validationCategory)) {
       fail("invalid_environment");
     }
+    this.#checkBundleVersion(extensions.bundleVersion);
     return {
       keyID: input.keyID,
       publicKeyPem: publicKey.export({ type: "spki", format: "pem" }).toString(),
@@ -303,9 +307,7 @@ export class AppAttestVerifier {
     if (input.key.validationCategory !== undefined && extensions.validationCategory !== input.key.validationCategory) {
       fail("invalid_environment");
     }
-    if (input.key.bundleVersion !== undefined && extensions.bundleVersion !== input.key.bundleVersion) {
-      fail("invalid_environment");
-    }
+    this.#checkBundleVersion(extensions.bundleVersion);
     let signatureValid = false;
     try {
       signatureValid = verify(
@@ -318,6 +320,12 @@ export class AppAttestVerifier {
       fail("invalid_key");
     }
     if (!signatureValid) fail("invalid_assertion");
-    return { ...input.key, counter: parsed.counter };
+    return { ...input.key, counter: parsed.counter, ...(extensions.bundleVersion === undefined ? {} : { bundleVersion: extensions.bundleVersion }) };
+  }
+
+  #checkBundleVersion(version: string | undefined): void {
+    if (version === undefined ? this.#policy.allowedBundleVersions.length > 0 : !this.#policy.allowedBundleVersions.includes(version)) {
+      fail("invalid_environment");
+    }
   }
 }

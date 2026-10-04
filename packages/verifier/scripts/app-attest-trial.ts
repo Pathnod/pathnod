@@ -45,6 +45,7 @@ const policy: AppAttestPolicy = {
   appID,
   environment: "development",
   allowedValidationCategories: [3],
+  allowedBundleVersions: [],
 };
 
 if (command === "issue") {
