@@ -231,12 +231,17 @@ Stack base: `feat/dev-21-esp32-gatt-challenge-response`.
 
 The SDK configuration selects `CONFIG_COMPILER_OPTIMIZATION_SIZE=y` without
 disabling storage protection or protocol features. Size means the **uncompressed
-application `pathnod_device.bin`**, excluding bootloader, partition table and NVS;
-the acceptance threshold is strictly **< 200,000 bytes**. `idf.py size` also reports
-ELF archive contributions, but is not a substitute for actual binary size.
-CI reports binary bytes and warns when this target is exceeded. It intentionally
-keeps functional/build checks useful: **green build checks do not establish the
-DEV-22 size acceptance criterion**. The budget remains unresolved.
+complete application `pathnod_device.bin`**, including image headers, segments,
+padding and trailer, but excluding bootloader, partition table and NVS.
+The acceptance limit is **<= 1 MiB (1,048,576 bytes)** for every supported
+target (ESP32-C3/S3) and build profile (development, protected, helium).
+This replaces the initial < 200,000-byte target. CI measures the actual file
+size and **fails above the limit**; a missing or empty binary also fails.
+`idf.py size` reports ELF archive contributions, but is not a substitute for
+actual binary size. The current 1.5 MiB factory app partition on 4 MiB flash
+leaves headroom; revisit this budget when defining an OTA partition layout.
+Passing CI does not establish full DEV-22 acceptance: hardware validation of
+the global 30-per-60-second quota and power loss during an NVS commit remains open.
 
 The build now selects ESP-IDF's minimal component dependency closure and nano
 printf/scanf. Protocol fields, Ed25519, NVS encryption and BLE security are
@@ -254,7 +259,8 @@ Compile-only measurements on 2026-10-04 with ESP-IDF v5.5.1:
 
 All four builds pass, with unchanged dependency locks and protected-profile
 NVS/flash checks. Both host profiles pass normally and with AddressSanitizer /
-UndefinedBehaviorSanitizer. These images **still exceed 200,000 bytes**.
+UndefinedBehaviorSanitizer. These images exceed the superseded 200,000-byte
+target, but are below the current 1 MiB limit.
 Bluetooth controller/host and libsodium remain major linked contributors;
 do not strip cryptographic initialization or storage guards to claim compliance.
 Recheck hardware processing time and BLE behavior after these build changes.
@@ -428,8 +434,8 @@ Protocol: [Pathnod Spec §1, §2.1, §2.4, §2.6](https://app.notion.com/p/Pathn
   and UndefinedBehaviorSanitizer runs.
 - ESP-IDF v5.5.1 development builds pass on C3 and S3 in isolated temporary copies.
   Application binary sizes: C3 661,904 bytes; S3 643,440 bytes (bootloader and
-  partition table excluded). The spec's **< 200 KB** size target is not met;
-  measuring/revisiting this budget remains necessary for DEV-22.
+  partition table excluded). These exceeded the initial < 200 KB target,
+  subsequently replaced by the 1 MiB limit described above.
 - Protected C3/S3 builds also pass; their generated configurations retain flash
   encryption, NVS encryption, flash-backed NVS key protection and the
   already-enabled bootloader guard. This is compile/configuration verification,
@@ -445,7 +451,8 @@ Protocol: [Pathnod Spec §1, §2.1, §2.4, §2.6](https://app.notion.com/p/Pathn
   deterministic public test vector.
 - ESP-IDF v5.5.1 builds pass for C3 and S3, in both development and protected
   profiles. Application sizes: C3 681,712 bytes; S3 662,704 bytes; protected C3
-  685,152 bytes; protected S3 665,872 bytes. The < 200 KB target remains unmet.
+  685,152 bytes; protected S3 665,872 bytes. These exceeded the initial < 200 KB
+  target, subsequently replaced by the 1 MiB limit described above.
 - No board was flashed and no eFuse was programmed. Real BLE reads/writes,
   notification delivery, MTU fallback and < 50 ms processing are **pending**
   the hardware acceptance procedure above; DEV-21 is not fully validated yet.
@@ -462,10 +469,10 @@ Protocol: [Pathnod Spec §1, §2.1, §2.4, §2.6](https://app.notion.com/p/Pathn
   Dependency lockfiles are unchanged. No board was flashed or eFuse programmed.
 - Final application binaries: C3 development **617,200 bytes**, S3 development
   **600,688 bytes**, C3 protected **620,384 bytes**, S3 protected **603,632 bytes**.
-  All are **above 200,000 bytes**; no compression or different size convention
-  is used to claim compliance. Archive analysis identifies significant SDK/BLE,
-  libsodium, libc and crypto contributions; simple size optimization is insufficient.
-- **Open acceptance items:** < 200 KB binary budget, real NVS power-interruption
+  All exceeded the initial 200,000-byte target and are below the revised 1 MiB
+  limit; no compression or different size convention is used. Archive analysis
+  identifies significant SDK/BLE, libsodium, libc and crypto contributions.
+- **Open acceptance items:** hardware global quota validation, real NVS power-interruption
   recovery, BLE 1 Hz observation, radio/MTU behavior, < 50 ms including reservation
   writes, and battery behavior. DEV-22 must not be marked fully validated yet.
 
@@ -479,8 +486,8 @@ Protocol: [Pathnod Spec §1, §2.1, §2.4, §2.6](https://app.notion.com/p/Pathn
   S3 598,080 / helium 598,720 bytes; C3 protected 617,744 bytes. Dependency
   lockfiles were unchanged. After integrating those optimizations, local C3
   development and helium builds measure 588,592 and 589,488 bytes respectively.
-  Rebuild the S3 and protected profiles to measure their current sizes; the
-  DEV-22 < 200 KB budget remains unmet.
+  Rebuild the S3 and protected profiles to measure their current sizes against
+  the revised DEV-22 1 MiB limit for every supported target/profile.
 - On the ESP32-C3 used for DEV-23 (development storage, no eFuse programmed), a
   build with an invalid asset ID refused to start at every boot with the log
   above and never advertised. The `sdkconfig.helium` build then logged the demo

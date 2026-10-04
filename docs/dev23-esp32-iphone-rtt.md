@@ -119,5 +119,7 @@ three verified responses, median 54.1 ms (54.1 / 55.2 / 44.6), capabilities
 - The epoch and observation hint are zero in this development test.
 - The read fallback was not exercised (MTU 185). It remains covered by the
   DEV-10 logic and the DEV-21 MTU 23 procedure.
-- DEV-22's open items are unchanged by this test: binary size above 200 KB,
-  NVS power-interruption recovery and battery behavior.
+- DEV-22's initial 200 KB target has since been replaced by a CI-enforced
+  1 MiB limit on the complete application `.bin` for every supported target/profile
+  (see the firmware README). This test does not validate the global 30-per-60-second
+  quota, power loss during an NVS commit or battery behavior; those checks remain open.
