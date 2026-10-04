@@ -28,6 +28,8 @@ jobs:
           cmake -S firmware/esp32/tests -B "$RUNNER_TEMP/firmware-tests"
           cmake --build "$RUNNER_TEMP/firmware-tests"
           ctest --test-dir "$RUNNER_TEMP/firmware-tests" --output-on-failure
+      - name: Test hardware quota harness verdicts without Bluetooth
+        run: python3 -m unittest discover -s firmware/esp32/tests -p test_hardware_quota.py
 
   build:
     runs-on: ubuntu-latest
@@ -46,6 +48,7 @@ jobs:
         env:
           FIRMWARE_TARGET: ${{ matrix.target }}
           FIRMWARE_PROFILE: ${{ matrix.profile }}
+          COLUMNS: '180'
         run: |
           set -euo pipefail
           # The container user differs from the checkout owner. Trust only this checkout.
@@ -61,6 +64,10 @@ jobs:
           idf.py -B build -D SDKCONFIG=sdkconfig.ci.local \
             -D SDKCONFIG_DEFAULTS="$defaults" set-target "$FIRMWARE_TARGET"
           idf.py -B build -D SDKCONFIG=sdkconfig.ci.local build size
+          idf.py -B build -D SDKCONFIG=sdkconfig.ci.local size-components > build/size-components.txt
+          idf.py -B build -D SDKCONFIG=sdkconfig.ci.local size-files > build/size-files.txt
+          cat build/size-components.txt >> "$GITHUB_STEP_SUMMARY"
+          cat build/size-files.txt
           if [[ "$FIRMWARE_PROFILE" == protected ]]; then
             for option in PATHNOD_REQUIRE_ENCRYPTED_STORAGE SECURE_FLASH_ENC_ENABLED \
               SECURE_FLASH_REQUIRE_ALREADY_ENABLED NVS_ENCRYPTION NVS_SEC_KEY_PROTECT_USING_FLASH_ENC; do
