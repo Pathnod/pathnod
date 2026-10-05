@@ -8,6 +8,15 @@ struct ChallengeScanView: View {
     var body: some View {
         NavigationStack {
             List {
+                Section("Observer enrollment") {
+                    NavigationLink("Preview public commitment") {
+                        ObserverEnrollmentView()
+                    }
+                    Text("Review the public value before enrollment. No observer secret is sent from this screen.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+
                 Section("S1 development test") {
                     Text("Connect to a Pathnod development device (ESP32 firmware or macOS simulator) and verify three signed Bluetooth challenges on this iPhone.")
                     Text("Keep this app open during the test. Challenges are spaced by more than two seconds to respect the device rate limit; that wait is not part of the RTT. This is a protocol and timing check, not proof of physical presence or distance.")
