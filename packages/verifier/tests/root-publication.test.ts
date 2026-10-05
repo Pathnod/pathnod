@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { randomBytes } from "node:crypto";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -9,6 +10,9 @@ import { ObserverEnrollmentService, type ObserverRootSnapshot } from "../src/obs
 import { ObserverRootPublisher, RootPublicationError, type RootPublicationSource,
   type RootPublicationTransport, type PreparedRootTransaction } from "../src/root-publication.ts";
 import { FakeEnrollmentGate } from "./helpers/enrollment-gate.ts";
+import { Keypair, PublicKey } from "@solana/web3.js";
+import { discriminator, UPGRADEABLE_LOADER } from "@pathnod/solana";
+import { SolanaRootPublicationTransport } from "../src/solana-root-publication.ts";
 
 class Source implements RootPublicationSource {
   rows: ObserverRootSnapshot[] = [];
@@ -174,4 +178,69 @@ test("DEV-26 databases gain leaf counts without changing the enrolled root; re-e
     await worker.tick(); assert.equal(f.transport.wires.length, 1);
     assert.equal(service.publicationBatch(1), undefined);
   } finally { await worker?.close(); service.close(); rmSync(f.dir, { recursive: true, force: true }); }
+});
+
+test("a confirmed bootstrap not yet visible at finalized commitment is retried before publication", async () => {
+  const f = fixture(), snapshot = f.source.add();
+  const signer = Keypair.generate(), program = Keypair.generate().publicKey;
+  const signerFile = join(f.dir, "publisher.json");
+  writeFileSync(signerFile, JSON.stringify([...signer.secretKey]), { mode: 0o600 });
+  const enrollmentData = Buffer.alloc(176);
+  discriminator("account", "EnrollmentAuthority").copy(enrollmentData);
+  signer.publicKey.toBuffer().copy(enrollmentData, 8);
+  enrollmentData.writeBigUInt64LE(1n, 40);
+  Buffer.from(snapshot.root.slice(2), "hex").copy(enrollmentData, 48);
+  const rootData = Buffer.alloc(84);
+  discriminator("account", "ObserverRoot").copy(rootData);
+  Buffer.from(snapshot.root.slice(2), "hex").copy(rootData, 8);
+  rootData.writeUInt32LE(snapshot.leafCount, 40);
+  rootData.writeBigInt64LE(1n, 44);
+  signer.publicKey.toBuffer().copy(rootData, 52);
+  const account = (data: Buffer, owner: PublicKey, executable = false) => ({
+    data: [data.toString("base64"), "base64"], owner: owner.toBase58(), executable,
+    lamports: 1_000_000, rentEpoch: 0,
+  });
+  let finalized = false, now = 0;
+  const requests: { method: string; params: unknown[] }[] = [];
+  const rpc = createServer(async (request, response) => {
+    const parts: Buffer[] = [];
+    for await (const part of request) parts.push(Buffer.from(part));
+    const call = JSON.parse(Buffer.concat(parts).toString()) as { id: string; method: string; params: unknown[] };
+    requests.push(call);
+    let result: unknown;
+    if (call.method === "getGenesisHash") result = "local-test-genesis";
+    else if (call.method === "getAccountInfo") {
+      result = { context: { slot: 50 }, value: call.params[0] === program.toBase58() ?
+        account(Buffer.alloc(0), UPGRADEABLE_LOADER, true) : account(enrollmentData, program) };
+    } else if (call.method === "getMultipleAccounts") {
+      result = { context: { slot: finalized ? 50 : 1 }, value: finalized ?
+        [account(rootData, program), account(enrollmentData, program)] : [null, null] };
+    }
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(JSON.stringify({ jsonrpc: "2.0", id: call.id, ...(result === undefined ?
+      { error: { code: -32601, message: "Unexpected test RPC method" } } : { result }) }));
+  });
+  let worker: ObserverRootPublisher | undefined;
+  try {
+    await new Promise<void>(resolve => rpc.listen(0, "127.0.0.1", resolve));
+    const address = rpc.address(); assert.ok(address && typeof address !== "string");
+    const transport = await SolanaRootPublicationTransport.open(`http://127.0.0.1:${address.port}`, program.toBase58(), signerFile);
+    worker = new ObserverRootPublisher(f.db, f.source, transport, { batchSize: 1, now: () => now });
+    await worker.tick();
+    assert.equal(worker.status().state, "retrying");
+    assert.equal(worker.status().lastError, "rpc_error");
+    assert.equal(worker.status().confirmed, null);
+    finalized = true; now = 1_000; await worker.tick();
+    assert.equal(worker.status().state, "confirmed");
+    assert.equal(worker.status().confirmed?.root, snapshot.root);
+    assert.equal(worker.status().confirmed?.active, true);
+    assert.equal(requests.filter(call => call.method === "getMultipleAccounts").length, 2);
+    assert.ok(requests.filter(call => call.method === "getMultipleAccounts")
+      .every(call => (call.params[1] as { commitment: string }).commitment === "finalized"));
+    assert.ok(requests.every(call => ["getGenesisHash", "getAccountInfo", "getMultipleAccounts"].includes(call.method)));
+  } finally {
+    await worker?.close();
+    await new Promise<void>(resolve => rpc.close(() => resolve()));
+    rmSync(f.dir, { recursive: true, force: true });
+  }
 });

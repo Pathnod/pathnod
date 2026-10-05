@@ -24,8 +24,10 @@ seconds. Overlapping worker ticks share one attempt.
 A publication is recorded as confirmed only after a **finalized** read checks
 the account owner, discriminator, root, leaf count, publication time and designated
 authority. The root and global enrollment account are read in the same RPC bank
-to determine whether the root is still in the last-four-root window. A previously
-published root can be reconciled without sending another transaction. Its
+to determine whether the root is still in the last-four-root window. The worker
+retries a confirmed bootstrap that is not yet visible in the finalized bank,
+without confirming or submitting a root. A previously published root can be
+reconciled without sending another transaction. Its
 signature may be unavailable after a lost RPC response, but the account link
 remains available.
 

@@ -70,6 +70,8 @@ export class SolanaRootPublicationTransport implements RootPublicationTransport 
     const address = new PublicKey(this.address(snapshot.root));
     const enrollmentAddress = registryAddresses(this.#program, Buffer.alloc(32)).enrollment;
     const accounts = await this.#connection.getMultipleAccountsInfoAndContext([address, enrollmentAddress], { commitment: "finalized" });
+    // A confirmed bootstrap may not exist yet in this finalized bank.
+    if (!accounts.value[1]) throw new RootPublicationError("rpc_error");
     const enrollment = this.#decodeEnrollment(accounts.value[1] ?? null);
     const account = accounts.value[0];
     if (!account) return undefined;
