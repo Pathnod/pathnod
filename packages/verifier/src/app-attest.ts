@@ -20,10 +20,12 @@ export type AppAttestVerificationErrorCode =
 
 export class AppAttestVerificationError extends Error {
   readonly code: AppAttestVerificationErrorCode;
+  readonly detail?: string;
 
-  constructor(code: AppAttestVerificationErrorCode) {
+  constructor(code: AppAttestVerificationErrorCode, detail?: string) {
     super(`App Attest verification failed: ${code}.`);
     this.code = code;
+    if (detail !== undefined) this.detail = detail;
   }
 }
 
@@ -168,11 +170,11 @@ function extensionValues(extensions: Map<string | number, CborValue> | undefined
   if (extensions === undefined) return {};
   const category = extensions.get("apple_validation_category_01");
   if (category !== undefined && (!Buffer.isBuffer(category) || category.length !== 4)) {
-    fail("invalid_environment");
+    throw new AppAttestVerificationError("invalid_environment", "validation_category_format");
   }
   const bundleVersion = extensions.get("apple_bundle_version_01");
   if (bundleVersion !== undefined && (typeof bundleVersion !== "string" || bundleVersion.length === 0)) {
-    fail("invalid_environment");
+    throw new AppAttestVerificationError("invalid_environment", "bundle_version_format");
   }
   return {
     ...(category === undefined ? {} : { validationCategory: category.readUInt32LE(0) }),
@@ -259,12 +261,14 @@ export class AppAttestVerifier {
     if (!equal(parsed.rpID, this.#rpID)) fail("invalid_app");
     if (parsed.counter !== 0) fail("invalid_counter");
     const expectedAAGUID = this.#policy.environment === "development" ? DEVELOPMENT_AAGUID : PRODUCTION_AAGUID;
-    if (!equal(authData.subarray(37, 53), expectedAAGUID)) fail("invalid_environment");
+    if (!equal(authData.subarray(37, 53), expectedAAGUID)) {
+      throw new AppAttestVerificationError("invalid_environment", "aaguid");
+    }
     if (parsed.credentialID === undefined || !equal(parsed.credentialID, keyID)) fail("invalid_key");
     checkCoseKey(parsed.coseKey, publicKey);
     const extensions = extensionValues(parsed.extensions);
     if (extensions.validationCategory !== undefined && !this.#policy.allowedValidationCategories.includes(extensions.validationCategory)) {
-      fail("invalid_environment");
+      throw new AppAttestVerificationError("invalid_environment", "validation_category");
     }
     this.#checkBundleVersion(extensions.bundleVersion);
     return {
@@ -302,10 +306,10 @@ export class AppAttestVerifier {
     if (!Number.isInteger(input.key.counter) || parsed.counter <= input.key.counter) fail("invalid_counter");
     const extensions = extensionValues(parsed.extensions);
     if (extensions.validationCategory !== undefined && !this.#policy.allowedValidationCategories.includes(extensions.validationCategory)) {
-      fail("invalid_environment");
+      throw new AppAttestVerificationError("invalid_environment", "validation_category");
     }
     if (input.key.validationCategory !== undefined && extensions.validationCategory !== input.key.validationCategory) {
-      fail("invalid_environment");
+      throw new AppAttestVerificationError("invalid_environment", "validation_category_changed");
     }
     this.#checkBundleVersion(extensions.bundleVersion);
     let signatureValid = false;
@@ -325,7 +329,7 @@ export class AppAttestVerifier {
 
   #checkBundleVersion(version: string | undefined): void {
     if (version === undefined ? this.#policy.allowedBundleVersions.length > 0 : !this.#policy.allowedBundleVersions.includes(version)) {
-      fail("invalid_environment");
+      throw new AppAttestVerificationError("invalid_environment", "bundle_version");
     }
   }
 }

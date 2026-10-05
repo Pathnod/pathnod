@@ -3,7 +3,7 @@
 Issue: [#53](https://github.com/Pathnod/pathnod/issues/53).
 
 The Pathnod S1 iOS app has an **Observer enrollment** preview. Tapping
-**Prepare enrollment preview** generates `s_obs` from 31 bytes supplied by
+**Prepare observer commitment** generates `s_obs` from 31 bytes supplied by
 `SecRandomCopyBytes` on first use. Later taps load the same secret from a separate
 Keychain generic-password item (`observer-secret-v1`), marked
 `AfterFirstUnlockThisDeviceOnly`. A missing item is the only case that creates a
@@ -19,9 +19,10 @@ constants pinned by `circomlibjs` 0.1.7; the resource
 `poseidon-t2.json` contains only those public parameters. Swift tests read
 `fixtures/poseidon/bn254-circom-v1.json` and compare all arity-1 vectors.
 
-The preview is local. DEV-25 sends no HTTP request and does not enroll the phone.
-DEV-26 will define the full request (including class and attestation), verify it
-server-side, and return a Merkle path. The secret must never appear in that
+The preview is local. DEV-25 itself sends no HTTP request and does not enroll
+the phone. [DEV-26](dev26-observer-enrollment-service.md) adds the enrollment
+request, server-side attestation verification, and returned Merkle path.
+The secret must never appear in that
 request, UI, logs, fixtures, or committed files. DEV-30/DEV-32 will use the same
 stored credential for observation proofs.
 
@@ -36,8 +37,8 @@ xcodebuild -project apps/ios/Pathnod.xcodeproj -scheme PathnodChallengeScan \
 ```
 
 On the paired iPhone, install the signed `PathnodChallengeScan` app, open
-**Preview public commitment**, and tap **Prepare enrollment preview**. Confirm
-the full 64-digit hex commitment is shown with the “no request sent” statement.
+**Enroll observer**, and tap **Prepare observer commitment**. Confirm
+the full 64-digit hex commitment is shown before submitting enrollment.
 Force-quit and reopen the app, then tap the same button; the commitment must be
 unchanged. Do not record the secret or replace a malformed Keychain record to
 make this check pass.
