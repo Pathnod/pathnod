@@ -1,16 +1,39 @@
 //! Pathnod on-chain program.
 //!
+//! Registry writes use requester and deployment-authorized enrollment signers.
 //! DEV-15 and DEV-16 are development-only Groth16 and nullifier spikes.
 //! Caller-selected keys confer no protocol trust.
 
 use anchor_lang::prelude::*;
 use groth16_solana::groth16::{Groth16Verifier, Groth16Verifyingkey};
 
+mod registry;
+pub use registry::*;
+
 declare_id!("5V9pXQN5dQkRBSTsaezBg6qLRC3mbLj21Ny3j7xtuHTd");
 
 #[program]
 pub mod pathnod {
     use super::*;
+
+    pub fn initialize_enrollment_authority(
+        ctx: Context<InitializeEnrollmentAuthority>,
+        authority: Pubkey,
+    ) -> Result<()> {
+        registry::handle_initialize_enrollment_authority(ctx, authority)
+    }
+
+    pub fn init_protocol(ctx: Context<InitProtocol>, args: ProtocolConfigArgs) -> Result<()> {
+        registry::handle_init_protocol(ctx, args)
+    }
+
+    pub fn register_device(ctx: Context<RegisterDevice>, args: RegisterDeviceArgs) -> Result<()> {
+        registry::handle_register_device(ctx, args)
+    }
+
+    pub fn publish_root(ctx: Context<PublishRoot>, root: [u8; 32], leaf_count: u32) -> Result<()> {
+        registry::handle_publish_root(ctx, root, leaf_count)
+    }
 
     /// No-op instruction used to prove that the pinned toolchain builds,
     /// generates an IDL and produces a loadable SBF binary.
@@ -58,10 +81,10 @@ pub mod pathnod {
         proof_b: [u8; 128],
         proof_c: [u8; 64],
     ) -> Result<()> {
-        require!(nullifier == public_inputs[4], SpikeError::InvalidProof);
+        require!(nullifier == public_inputs[4], PathnodError::InvalidProof);
         require!(
             !ctx.accounts.commitment.accepted,
-            SpikeError::NullifierAlreadyUsed
+            PathnodError::NullifierAlreadyUsed
         );
         verify_proof(
             &ctx.accounts.config.key,
@@ -144,11 +167,35 @@ pub struct SubmitObservation<'info> {
 }
 
 #[error_code]
-pub enum SpikeError {
+pub enum PathnodError {
     #[msg("Invalid Groth16 proof, key or non-canonical public input")]
     InvalidProof,
     #[msg("E_NULLIFIER: observation nullifier already used")]
     NullifierAlreadyUsed,
+    #[msg("Registry write requires its designated authority")]
+    Unauthorized = 100,
+    #[msg("Protocol ID must be nonzero")]
+    InvalidProtocol,
+    #[msg("Invalid epoch, verifier or reward policy")]
+    InvalidPolicy,
+    #[msg("Reward mint must be a six-decimal legacy SPL mint")]
+    InvalidMint,
+    #[msg("Device ID does not match its nonzero registered key")]
+    InvalidDevice,
+    #[msg("Only Ed25519 devices are supported in this registry version")]
+    UnsupportedCurve,
+    #[msg("External asset control proofs are not supported in this registry version")]
+    UnsupportedControlProof,
+    #[msg("Declared geohash must contain six lowercase geohash characters")]
+    InvalidGeohash,
+    #[msg("Observer root must be a canonical big-endian BN254 field element")]
+    InvalidRoot,
+    #[msg("Observer leaf count exceeds the depth-20 tree capacity")]
+    InvalidLeafCount,
+    #[msg("Enrollment authority must be nonzero")]
+    InvalidAuthority,
+    #[msg("Root publication counter overflow")]
+    PublicationOverflow,
 }
 
 fn verify_proof(
@@ -168,10 +215,10 @@ fn verify_proof(
     };
     log_compute_units();
     let mut verifier = Groth16Verifier::new(proof_a, proof_b, proof_c, public_inputs, &vk)
-        .map_err(|_| error!(SpikeError::InvalidProof))?;
+        .map_err(|_| error!(PathnodError::InvalidProof))?;
     verifier
         .verify()
-        .map_err(|_| error!(SpikeError::InvalidProof))?;
+        .map_err(|_| error!(PathnodError::InvalidProof))?;
     log_compute_units();
     Ok(())
 }

@@ -14,8 +14,8 @@ zero-knowledge mechanisms for uniqueness and privacy, and on-chain accounting.
    and the infrastructure device signs a response with its local key.
 2. **Observer attestation.** The phone supplies a hardware-backed platform signal
    to make software-only observation farms harder to operate.
-3. **Zero-knowledge proof.** The observer proves an eligible response while
-   limiting disclosure, and derives a nullifier for duplicate detection.
+3. **Zero-knowledge proof.** The observer proves membership in the enrolled
+   observer tree and derives a nullifier and a protocol-scoped pseudonym.
 4. **Registry and accounting.** A Solana program is intended to track registered
    devices, accepted observations, and operator-funded rewards.
 
@@ -33,6 +33,7 @@ firmware/esp32/      BLE device firmware
 tools/device-sim/    device simulator
 packages/circuits/   zero-knowledge circuits and proving tools
 packages/verifier/   off-chain verifier
+packages/solana/     registry instruction builders and chain validation tools
 programs/pathnod/    Solana program
 docs/                architecture decisions and project notes
 ```
@@ -45,12 +46,15 @@ running system yet.
 - `packages/verifier` validates Apple App Attest attestation and assertions,
   using an Apple root certificate and a SQLite store for one-time challenges,
   verified keys, and assertion counters. The [DEV-19 runbook](docs/dev19-app-attest-server.md)
-  documents the iPhone proof and remaining integration limits.
+  documents the iPhone proof and remaining integration limits. DEV-26 adds
+  commitment enrollment, a persistent depth-20 Poseidon tree and authenticated
+  Merkle-path refresh; see the [enrollment runbook](docs/dev26-observer-enrollment-service.md).
 - `apps/ios` holds a Swift package for the density study, challenge protocol,
   and `PathnodAppAttest` client. The
   [App Attest spike](apps/ios/AppAttestSpike/README.md) exercises Apple's
   generation APIs on a supported iPhone and can export local evidence for the
-  verifier. The observer app has no App Attest request flow yet.
+  verifier. The S1 challenge app also supports persistent observer credentials
+  and enrollment against the DEV-26 service.
 - `PathnodDensityScan` is a measurement instrument for a two-hour field study,
   not the observer app: it counts BLE advertisers visible while it is open,
   never connects, never runs in the background, never asks for location, and
@@ -66,13 +70,16 @@ running system yet.
 - `firmware/esp32` provides DEV-20/21/22 ESP-IDF/NimBLE discovery and persistent
   Ed25519 identity baseline, with separate development/protected storage
   profiles, plus GATT challenge/response signing over `SHA-256(DEV_MSG_V0)`,
-  replay/rate guards and NVS-backed monotonic counters. The < 200 KB size target
-  is not met; a passing firmware build is not full DEV-22 acceptance.
-  Radio behavior and the < 50 ms target still require hardware validation. See the
+  replay/rate guards and NVS-backed monotonic counters. CI enforces the revised
+  1 MiB application binary budget. Full global rate-limit and interrupted NVS
+  commit validation remain open. See the
   [firmware README](firmware/esp32/README.md) for build and iPhone validation.
-- `programs/pathnod` includes development-only Groth16 verification and
-  observation submission with one commitment PDA per nullifier. The key is
-  caller-selected; there is no trusted registry, reward, or payment logic.
+- `programs/pathnod` includes protocol configuration, SPL escrow creation,
+  requester-authorized device registration and enrollment-authorized global
+  observer roots. [DEV-27](docs/dev27-protocol-registry.md) documents the accounts
+  and chain validation. The older Groth16/nullifier submission spike still uses
+  caller-selected keys and does not validate observations against this registry.
+  Reward distribution and withdrawals are not implemented yet.
 - The repository currently establishes component boundaries and a reproducible
   development toolchain.
 
@@ -104,6 +111,8 @@ artifacts, or build output.
 - [DEV-17 Gate 1 decision](docs/gates/dev17-gate1.md)
 - [DEV-18 iPhone App Attest spike](apps/ios/AppAttestSpike/README.md)
 - [DEV-19 App Attest server verification](docs/dev19-app-attest-server.md)
+- [DEV-26 observer enrollment service](docs/dev26-observer-enrollment-service.md)
+- [DEV-27 protocol and device registry](docs/dev27-protocol-registry.md)
 
 ## Contributing
 
