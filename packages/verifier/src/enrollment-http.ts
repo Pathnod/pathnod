@@ -3,6 +3,8 @@ import { pathToFileURL } from "node:url";
 
 import { AppAttestGate } from "./app-attest-gate.ts";
 import { EnrollmentError, ObserverEnrollmentService } from "./observer-enrollment.ts";
+import { ObserverRootPublisher } from "./root-publication.ts";
+import { SolanaRootPublicationTransport } from "./solana-root-publication.ts";
 
 const MAX_BODY = 128 * 1024;
 
@@ -44,14 +46,14 @@ function challenge(value: ReturnType<ObserverEnrollmentService["issueEnrollmentC
   return { id: value.id, challenge: value.bytes.toString("base64"), mode: value.mode, expiresAt: value.expiresAt };
 }
 
-export function createEnrollmentServer(service: ObserverEnrollmentService): Server {
+export function createEnrollmentServer(service: ObserverEnrollmentService, publisher?: ObserverRootPublisher): Server {
   return createServer(async (request, response) => {
     try {
       const url = new URL(request.url ?? "", "http://localhost");
       if (request.method === "GET" && url.pathname === "/health") {
         send(response, 200, { status: "ok" });
       } else if (request.method === "GET" && url.pathname === "/root") {
-        send(response, 200, service.root());
+        send(response, 200, { ...service.root(), publication: publisher?.status() ?? { enabled: false } });
       } else if (request.method === "POST" && url.pathname === "/enroll/challenge") {
         const input = await body(request, ["commitment", "keyID"]);
         send(response, 200, challenge(service.issueEnrollmentChallenge(input.commitment, input.keyID)));
@@ -104,9 +106,31 @@ async function main(): Promise<void> {
   }, { maxPendingChallenges: Number(process.env.PATHNOD_PENDING_CHALLENGE_LIMIT ?? "1024") });
   const service = await ObserverEnrollmentService.open(db, gate,
     { maxPendingChallenges: Number(process.env.PATHNOD_PENDING_CHALLENGE_LIMIT ?? "1024") });
-  const server = createEnrollmentServer(service);
+  const rpc = process.env.PATHNOD_ROOT_RPC_URL;
+  const program = process.env.PATHNOD_ROOT_PROGRAM_ID;
+  const signer = process.env.PATHNOD_ROOT_SIGNER;
+  let publisher: ObserverRootPublisher | undefined;
+  try {
+    if ([rpc, program, signer].some(value => value !== undefined)) {
+      if (!rpc || !program || !signer) throw Error("Set all three PATHNOD_ROOT_RPC_URL, PATHNOD_ROOT_PROGRAM_ID and PATHNOD_ROOT_SIGNER.");
+      const transport = await SolanaRootPublicationTransport.open(rpc, program, signer);
+      publisher = new ObserverRootPublisher(db, service, transport, {
+        batchSize: Number(process.env.PATHNOD_ROOT_BATCH_SIZE ?? "16"),
+        maxDelayMs: Number(process.env.PATHNOD_ROOT_MAX_DELAY_MS ?? "30000"),
+      });
+      publisher.start();
+    }
+  } catch (error) { service.close(); gate.close(); throw error; }
+  const server = createEnrollmentServer(service, publisher);
   server.listen(port, host, () => { process.stdout.write(`Enrollment server listening on ${host}:${port}\n`); });
-  const close = () => server.close(() => { service.close(); gate.close(); });
+  let closing = false;
+  const close = () => {
+    if (closing) return;
+    closing = true;
+    server.close(() => {
+      void (async () => { await publisher?.close(); service.close(); gate.close(); })();
+    });
+  };
   process.once("SIGINT", close);
   process.once("SIGTERM", close);
 }

@@ -15,8 +15,8 @@ import {
 const options = new Map<string, string>();
 for (let i = 2; i < process.argv.length; i += 2) {
   const key = process.argv[i]!, value = process.argv[i + 1];
-  if (!["--rpc", "--wallet", "--program", "--report", "--root", "--leaf-count"].includes(key) || !value || options.has(key)) {
-    throw new Error("Usage: registry:verify --rpc URL --wallet KEYPAIR --program PROGRAM_ID --report FILE [--root HEX --leaf-count N]");
+  if (!["--rpc", "--wallet", "--publisher-wallet", "--program", "--report", "--root", "--leaf-count"].includes(key) || !value || options.has(key)) {
+    throw new Error("Usage: registry:verify --rpc URL --wallet KEYPAIR --program PROGRAM_ID --report FILE [--root HEX --leaf-count N] [--publisher-wallet KEYPAIR]");
   }
   options.set(key, value);
 }
@@ -55,7 +55,9 @@ async function main() {
   const protocolId = createHash("sha256").update("Pathnod/DEV-27/test").update(randomBytes(32)).digest();
   const addresses = registryAddresses(program, protocolId);
   assert.equal(await connection.getAccountInfo(addresses.enrollment), null, "Use a fresh deployment: enrollment authority already exists");
-  const publisher = Keypair.generate(), intruder = Keypair.generate();
+  const publisherFile = options.get("--publisher-wallet");
+  const publisher = publisherFile ? Keypair.fromSecretKey(Uint8Array.from(JSON.parse(await readFile(publisherFile, "utf8")))) : Keypair.generate();
+  const intruder = Keypair.generate();
   const accepted: Record<string, { signature: string; computeUnits: number; transactionBytes: number }> = {};
   const rejected: Record<string, unknown> = {};
 

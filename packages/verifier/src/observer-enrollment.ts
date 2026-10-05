@@ -50,6 +50,13 @@ export interface MerklePath {
   readonly rootRevision: number;
 }
 
+export interface ObserverRootSnapshot {
+  readonly root: string;
+  readonly revision: number;
+  readonly leafCount: number;
+  readonly createdAt: number;
+}
+
 interface ChallengeRow {
   id: string;
   operation: string;
@@ -129,6 +136,7 @@ export class ObserverEnrollmentService {
       CREATE TABLE IF NOT EXISTS observer_roots (
         revision INTEGER PRIMARY KEY,
         root TEXT NOT NULL,
+        leaf_count INTEGER NOT NULL,
         created_at INTEGER NOT NULL
       );
       CREATE TABLE IF NOT EXISTS observer_enrollment_events (
@@ -141,13 +149,25 @@ export class ObserverEnrollmentService {
       );
       CREATE INDEX IF NOT EXISTS observer_challenge_expiry ON observer_challenges(expires_at);
     `);
+    const columns = this.#database.prepare("PRAGMA table_info(observer_roots)").all();
+    if (!columns.some((column) => column.name === "leaf_count")) {
+      this.#database.exec(`
+        BEGIN IMMEDIATE;
+        ALTER TABLE observer_roots ADD COLUMN leaf_count INTEGER NOT NULL DEFAULT 0;
+        UPDATE observer_roots SET leaf_count = (
+          SELECT COUNT(*) FROM observer_enrollment_events
+          WHERE action = 'enrolled' AND root_revision <= observer_roots.revision
+        );
+        COMMIT;
+      `);
+    }
     this.#empty = [hex(0n)];
     for (let level = 0; level < DEPTH; level++) {
       const previous = field(this.#empty[level]);
       this.#empty.push(hex(this.#hash(previous, previous)));
     }
     this.#database.prepare(
-      "INSERT OR IGNORE INTO observer_roots (revision, root, created_at) VALUES (0, ?, ?)",
+      "INSERT OR IGNORE INTO observer_roots (revision, root, leaf_count, created_at) VALUES (0, ?, 0, ?)",
     ).run(this.#empty[DEPTH]!, Date.now());
   }
 
@@ -251,6 +271,19 @@ export class ObserverEnrollmentService {
 
   root(): { root: string; revision: number } { return this.#rootState(); }
 
+  publicationBatch(afterRevision: number): { snapshot: ObserverRootSnapshot; oldestPendingAt: number } | undefined {
+    const row = this.#database.prepare(`
+      SELECT root, revision, leaf_count AS leafCount, created_at AS createdAt
+      FROM observer_roots ORDER BY revision DESC LIMIT 1
+    `).get() as { root: string; revision: number; leafCount: number; createdAt: number };
+    if (row.revision <= afterRevision || row.leafCount === 0) return undefined;
+    const count = this.#database.prepare("SELECT COUNT(*) AS n FROM observer_enrollments").get() as { n: number };
+    if (count.n !== row.leafCount) throw Error("Enrollment root and leaf count disagree");
+    const oldest = this.#database.prepare("SELECT MIN(created_at) AS t FROM observer_roots WHERE revision > ?")
+      .get(afterRevision) as { t: number };
+    return { snapshot: row, oldestPendingAt: oldest.t };
+  }
+
   #hash(...inputs: bigint[]): bigint {
     return this.#poseidon.F.toObject(this.#poseidon(inputs));
   }
@@ -342,8 +375,8 @@ export class ObserverEnrollmentService {
       ON CONFLICT(level, node_index) DO UPDATE SET value = excluded.value
     `).run(DEPTH, current);
     const revision = this.#rootState().revision + 1;
-    this.#database.prepare("INSERT INTO observer_roots (revision, root, created_at) VALUES (?, ?, ?)")
-      .run(revision, current, Date.now());
+    this.#database.prepare("INSERT INTO observer_roots (revision, root, leaf_count, created_at) VALUES (?, ?, ?, ?)")
+      .run(revision, current, leafIndex + 1, Date.now());
   }
 
   #rootState(): { root: string; revision: number } {

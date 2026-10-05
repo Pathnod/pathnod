@@ -75,6 +75,7 @@ From the repository root, build and launch the server with a development
 signed app. Use a local database path outside the repository:
 
 ```sh
+pnpm --filter @pathnod/solana build
 pnpm --filter @pathnod/verifier build
 PATHNOD_ENROLLMENT_DB=/private/tmp/pathnod-dev26-enrollment.sqlite \
 PATHNOD_APP_ATTEST_APP_ID=U5MCCC24G5.xyz.pathnod.challengescan \
@@ -103,6 +104,11 @@ root, and sibling count. **Refresh Merkle path** obtains a fresh assertion and
 the latest root after more observers enroll. If an initial attestation was
 rejected, **Reset failed App Attest key** generates a new Apple key on the
 next attempt; it leaves `s_obs` intact.
+
+`GET /root` returns the latest local root and revision. DEV-28 adds optional
+on-chain publication status to that response; the local root may still be
+pending. See the [publication runbook](dev28-root-publication.md) for the signer,
+batch settings, recovery behavior and published-root checks.
 
 ## Verification
 
