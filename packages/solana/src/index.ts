@@ -25,6 +25,7 @@ export function deviceId(key: Uint8Array): Buffer {
 }
 
 function u32(value: number): Buffer {
+  if (!Number.isInteger(value) || value < 0 || value > 0xffff_ffff) throw new Error("Invalid u32");
   const bytes = Buffer.alloc(4);
   bytes.writeUInt32LE(value);
   return bytes;
@@ -52,6 +53,7 @@ export function registryAddresses(program: PublicKey, protocol: Uint8Array) {
     escrow: pda(Buffer.from("escrow"), bytes32(protocol)),
     enrollment: pda(Buffer.from("enrollment-authority")),
     device: (id: Uint8Array) => pda(Buffer.from("device"), bytes32(protocol), bytes32(id)),
+    epoch: (id: Uint8Array, epoch: number) => pda(Buffer.from("epoch"), bytes32(protocol), bytes32(id), u32(epoch)),
     root: (root: Uint8Array) => pda(Buffer.from("root"), bytes32(root)),
   };
 }
@@ -137,6 +139,7 @@ class Reader {
   }
   key() { return new PublicKey(this.bytes(32)); }
   u8() { return this.bytes(1)[0]!; }
+  u16() { return this.bytes(2).readUInt16LE(); }
   u32() { return this.bytes(4).readUInt32LE(); }
   u64() { return this.bytes(8).readBigUInt64LE(); }
   i64() { return this.bytes(8).readBigInt64LE(); }
@@ -182,6 +185,16 @@ export function decodeRoot(data: Uint8Array) {
 export function decodeEnrollment(data: Uint8Array) {
   const r = new Reader(data, "EnrollmentAuthority", 176);
   const result = { authority: r.key(), publications: r.u64(), recentRoots: Array.from({ length: 4 }, () => r.bytes(32)) };
+  r.finish();
+  return result;
+}
+
+export function decodeDeviceEpoch(data: Uint8Array) {
+  const r = new Reader(data, "DeviceEpoch", 75);
+  const result = {
+    independentObservers: r.u16(), paidSlotsUsed: r.u8(),
+    observationRoot: r.bytes(32), confidenceCommitment: r.bytes(32),
+  };
   r.finish();
   return result;
 }

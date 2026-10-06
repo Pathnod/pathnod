@@ -5,6 +5,7 @@ import { AppAttestGate } from "./app-attest-gate.ts";
 import { EnrollmentError, ObserverEnrollmentService } from "./observer-enrollment.ts";
 import { ObserverRootPublisher } from "./root-publication.ts";
 import { SolanaRootPublicationTransport } from "./solana-root-publication.ts";
+import { DeviceEligibilityService, EligibilityError } from "./device-eligibility.ts";
 
 const MAX_BODY = 128 * 1024;
 
@@ -46,7 +47,8 @@ function challenge(value: ReturnType<ObserverEnrollmentService["issueEnrollmentC
   return { id: value.id, challenge: value.bytes.toString("base64"), mode: value.mode, expiresAt: value.expiresAt };
 }
 
-export function createEnrollmentServer(service: ObserverEnrollmentService, publisher?: ObserverRootPublisher): Server {
+export function createEnrollmentServer(service: ObserverEnrollmentService, publisher?: ObserverRootPublisher,
+  eligibility?: DeviceEligibilityService): Server {
   return createServer(async (request, response) => {
     try {
       const url = new URL(request.url ?? "", "http://localhost");
@@ -54,6 +56,18 @@ export function createEnrollmentServer(service: ObserverEnrollmentService, publi
         send(response, 200, { status: "ok" });
       } else if (request.method === "GET" && url.pathname === "/root") {
         send(response, 200, { ...service.root(), publication: publisher?.status() ?? { enabled: false } });
+      } else if (/^\/devices\/[^/]+\/slots$/.test(url.pathname)) {
+        if (request.method !== "GET") {
+          response.setHeader("allow", "GET"); send(response, 405, { error: "method_not_allowed" });
+        } else {
+          if ([...url.searchParams.keys()].some(key => !["epoch", "protocol_id"].includes(key)) ||
+              url.searchParams.getAll("epoch").length !== 1 || url.searchParams.getAll("protocol_id").length > 1) {
+            throw new EligibilityError("invalid_input");
+          }
+          if (!eligibility) { send(response, 503, { error: "eligibility_unavailable" }); return; }
+          send(response, 200, await eligibility.slots(url.pathname.split("/")[2], url.searchParams.get("epoch"),
+            url.searchParams.get("protocol_id") ?? undefined));
+        }
       } else if (request.method === "POST" && url.pathname === "/enroll/challenge") {
         const input = await body(request, ["commitment", "keyID"]);
         send(response, 200, challenge(service.issueEnrollmentChallenge(input.commitment, input.keyID)));
@@ -72,7 +86,9 @@ export function createEnrollmentServer(service: ObserverEnrollmentService, publi
         send(response, 404, { error: "not_found" });
       }
     } catch (error) {
-      if (error instanceof EnrollmentError) {
+      if (error instanceof EligibilityError) {
+        send(response, error.code === "invalid_input" ? 400 : error.code === "protocol_unknown" ? 404 : 503, { error: error.code });
+      } else if (error instanceof EnrollmentError) {
         const status = error.code === "challenge_limit" ? 429 : error.code === "unknown_observer" ? 404 :
           error.code === "already_enrolled" ? 409 : error.code === "tree_full" ? 507 : 400;
         send(response, status, {
@@ -110,7 +126,18 @@ async function main(): Promise<void> {
   const program = process.env.PATHNOD_ROOT_PROGRAM_ID;
   const signer = process.env.PATHNOD_ROOT_SIGNER;
   let publisher: ObserverRootPublisher | undefined;
+  let eligibility: DeviceEligibilityService | undefined;
   try {
+    const eligibilityRPC = process.env.PATHNOD_ELIGIBILITY_RPC_URL;
+    const eligibilityProgram = process.env.PATHNOD_ELIGIBILITY_PROGRAM_ID;
+    const eligibilityProtocol = process.env.PATHNOD_ELIGIBILITY_PROTOCOL_ID;
+    const eligibilityMint = process.env.PATHNOD_ELIGIBILITY_REWARD_MINT;
+    if ([eligibilityRPC, eligibilityProgram, eligibilityProtocol, eligibilityMint].some(value => value !== undefined)) {
+      if (!eligibilityRPC || !eligibilityProgram || !eligibilityProtocol) {
+        throw Error("Set all three PATHNOD_ELIGIBILITY_RPC_URL, PATHNOD_ELIGIBILITY_PROGRAM_ID and PATHNOD_ELIGIBILITY_PROTOCOL_ID.");
+      }
+      eligibility = await DeviceEligibilityService.open(eligibilityRPC, eligibilityProgram, eligibilityProtocol, eligibilityMint);
+    }
     if ([rpc, program, signer].some(value => value !== undefined)) {
       if (!rpc || !program || !signer) throw Error("Set all three PATHNOD_ROOT_RPC_URL, PATHNOD_ROOT_PROGRAM_ID and PATHNOD_ROOT_SIGNER.");
       const transport = await SolanaRootPublicationTransport.open(rpc, program, signer);
@@ -121,7 +148,7 @@ async function main(): Promise<void> {
       publisher.start();
     }
   } catch (error) { service.close(); gate.close(); throw error; }
-  const server = createEnrollmentServer(service, publisher);
+  const server = createEnrollmentServer(service, publisher, eligibility);
   server.listen(port, host, () => { process.stdout.write(`Enrollment server listening on ${host}:${port}\n`); });
   let closing = false;
   const close = () => {

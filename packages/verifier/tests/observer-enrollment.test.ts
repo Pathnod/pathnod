@@ -155,6 +155,9 @@ test("HTTP rejects invalid evidence and returns a valid path", async () => {
     assert.equal((await fetch(pathURL, { headers })).status, 400);
     assert.equal((await post("/tree/challenge", { commitment: commitmentB, keyID: keyB })).status, 404);
     assert.equal((await fetch(base + "/root")).status, 200);
+    const disabled = await fetch(`${base}/devices/${commitmentA}/slots?epoch=42`);
+    assert.equal(disabled.status, 503);
+    assert.deepEqual(await disabled.json(), { error: "eligibility_unavailable" });
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
     service.close(); rmSync(dir, { recursive: true, force: true });
