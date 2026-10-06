@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 import { buildPoseidon } from "circomlibjs";
-import { decodeObservationTranscript, observationEvidenceHash, observationTranscriptHash } from "./observation-transcript.ts";
+import { decodeObservationTranscript, observationEvidenceHash } from "./observation-transcript.ts";
 
 const FIELD = 21888242871839275222246405745257275088548364400416034343698204186575808495617n;
 const BASE = 21888242871839275222246405745257275088696311157297823662689037894645226208583n;
@@ -43,11 +43,13 @@ function decimal(value: unknown, limit: bigint): string {
 const integer = (value: Uint8Array): string => BigInt("0x" + Buffer.from(value).toString("hex")).toString();
 
 /** Framing and public-input consistency only; this is NOT the DEV-33 policy. */
-export async function parseObservationEnvelope(value: unknown): Promise<{ envelope: ObservationEnvelope; hash: string }> {
+export async function parseObservationEnvelope(value: unknown, policyMode = false): Promise<{
+  envelope: ObservationEnvelope; hash: string; publicInputsMatch: boolean;
+}> {
   const obj = record(value, ["transcript", "assertion", "key_id", "zk"], ["evidence"]);
   const transcriptBytes = bytes(obj.transcript, 611);
   let t: ReturnType<typeof decodeObservationTranscript>;
-  try { t = decodeObservationTranscript(transcriptBytes); } catch { throw new ObservationInboxError("invalid_observation"); }
+  try { t = decodeObservationTranscript(transcriptBytes, policyMode ? 0 : 5); } catch { throw new ObservationInboxError("invalid_observation"); }
   bytes(obj.assertion, 16_384);
   if (typeof obj.key_id !== "string" || obj.key_id.length === 0 || Buffer.byteLength(obj.key_id) > 1024) {
     throw new ObservationInboxError("invalid_observation");
@@ -64,7 +66,8 @@ export async function parseObservationEnvelope(value: unknown): Promise<{ envelo
   ])).toString();
   const expected = [idField(t.protocolID, 3), idField(t.deviceID, 4), String(t.epoch),
     integer(t.nullifier), integer(t.pseudonym), String(t.observerClass)];
-  if (inputs.slice(1).some((v, i) => v !== expected[i])) throw new ObservationInboxError("invalid_observation");
+  const publicInputsMatch = inputs.slice(1).every((v, i) => v === expected[i]);
+  if (!policyMode && !publicInputsMatch) throw new ObservationInboxError("invalid_observation");
   const proof = record(zk.proof, ["pi_a", "pi_b", "pi_c", "protocol", "curve"]);
   const point = (value: unknown, length: number): string[] => {
     if (!Array.isArray(value) || value.length !== length) throw new ObservationInboxError("invalid_observation");
@@ -80,7 +83,7 @@ export async function parseObservationEnvelope(value: unknown): Promise<{ envelo
     zk: { proof: { pi_a: a, pi_b: b, pi_c: c, protocol: "groth16", curve: "bn128" }, public: inputs },
     ...(evidence === undefined ? {} : { evidence: evidence.toString("base64") }),
   };
-  return { envelope, hash: observationTranscriptHash(t).toString("hex") };
+  return { envelope, hash: createHash("sha256").update("Pathnod/transcript/v0", "ascii").update(transcriptBytes).digest("hex"), publicInputsMatch };
 }
 
 /** Explicit loopback-only development receipt sink. Never verifies or signs an observation. */

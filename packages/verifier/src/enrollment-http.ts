@@ -7,6 +7,9 @@ import { ObserverRootPublisher } from "./root-publication.ts";
 import { SolanaRootPublicationTransport } from "./solana-root-publication.ts";
 import { DeviceEligibilityService, EligibilityError } from "./device-eligibility.ts";
 import { DevelopmentObservationInbox, ObservationInboxError } from "./observation-inbox.ts";
+import { ObservationPolicyService, ObservationPolicyError } from "./observation-policy.ts";
+import { SolanaObservationPolicySource } from "./observation-solana.ts";
+import { PinnedGroth16Verifier } from "./observation-groth16.ts";
 
 const MAX_BODY = 128 * 1024;
 
@@ -49,7 +52,9 @@ function challenge(value: ReturnType<ObserverEnrollmentService["issueEnrollmentC
 }
 
 export function createEnrollmentServer(service: ObserverEnrollmentService, publisher?: ObserverRootPublisher,
-  eligibility?: DeviceEligibilityService, inbox?: DevelopmentObservationInbox): Server {
+  eligibility?: DeviceEligibilityService, inbox?: DevelopmentObservationInbox, policy?: ObservationPolicyService): Server {
+  if (inbox && policy) throw Error("Development receipt and policy validation are mutually exclusive");
+  let validating = 0;
   return createServer(async (request, response) => {
     try {
       const url = new URL(request.url ?? "", "http://localhost");
@@ -74,6 +79,12 @@ export function createEnrollmentServer(service: ObserverEnrollmentService, publi
       } else if (url.pathname === "/observations") {
         if (request.method !== "POST") {
           response.setHeader("allow", "POST"); send(response, 405, { error: "method_not_allowed" });
+        } else if (policy) {
+          if (validating >= 2) { send(response, 429, { error: "observation_busy" }); return; }
+          validating++;
+          try {
+            send(response, 202, await policy.receive(await body(request, ["transcript", "assertion", "key_id", "zk"], ["evidence"])));
+          } finally { validating--; }
         } else if (!inbox) {
           send(response, 503, { error: "observation_receiver_unavailable" });
         } else if (!["127.0.0.1", "::1", "::ffff:127.0.0.1"].includes(request.socket.remoteAddress ?? "")) {
@@ -99,7 +110,10 @@ export function createEnrollmentServer(service: ObserverEnrollmentService, publi
         send(response, 404, { error: "not_found" });
       }
     } catch (error) {
-      if (error instanceof ObservationInboxError) {
+      if (error instanceof ObservationPolicyError) {
+        send(response, error.code === "observation_dependency_unavailable" ? 503 : error.code === "observation_capacity" ? 507 : 422,
+          { error: error.code });
+      } else if (error instanceof ObservationInboxError) {
         send(response, error.code === "receipt_conflict" ? 409 : error.code === "inbox_full" ? 507 : 400, { error: error.code });
       } else if (error instanceof EligibilityError) {
         send(response, error.code === "invalid_input" ? 400 : error.code === "protocol_unknown" ? 404 : 503, { error: error.code });
@@ -127,6 +141,15 @@ async function main(): Promise<void> {
     .split(",").filter((value) => value.length > 0);
   const host = process.env.PATHNOD_ENROLLMENT_HOST ?? "127.0.0.1";
   const receiptDB = process.env.PATHNOD_DEV32_RECEIPT_DB;
+  const observationVK = process.env.PATHNOD_OBSERVATION_VK;
+  const observationSHA = process.env.PATHNOD_OBSERVATION_VK_SHA256;
+  const observationRPC = process.env.PATHNOD_OBSERVATION_RPC_URL;
+  const observationProgram = process.env.PATHNOD_OBSERVATION_PROGRAM_ID;
+  const observationProtocol = process.env.PATHNOD_OBSERVATION_PROTOCOL_ID;
+  const observationEnabled = [observationVK, observationSHA, observationRPC, observationProgram, observationProtocol].some(v => v !== undefined);
+  if (observationEnabled && (receiptDB || !observationVK || !observationSHA || !observationRPC || !observationProgram || !observationProtocol)) {
+    throw Error("Set all five PATHNOD_OBSERVATION_* required settings; do not enable the development receipt sink.");
+  }
   if (receiptDB && (process.env.NODE_ENV === "production" || !["127.0.0.1", "::1"].includes(host))) {
     throw Error("DEV-32 receipt sink requires a non-production loopback host.");
   }
@@ -146,7 +169,18 @@ async function main(): Promise<void> {
   const signer = process.env.PATHNOD_ROOT_SIGNER;
   let publisher: ObserverRootPublisher | undefined;
   let eligibility: DeviceEligibilityService | undefined;
+  let observationPolicy: ObservationPolicyService | undefined;
   try {
+    if (observationEnabled) {
+      const proof = new PinnedGroth16Verifier(observationVK!, observationSHA!);
+      const source = await SolanaObservationPolicySource.open(observationRPC!, observationProgram!, observationProtocol!,
+        Number(process.env.PATHNOD_OBSERVATION_MINIMUM_RSSI ?? "-90"), Number(process.env.PATHNOD_OBSERVATION_POLICY_VERSION ?? "1"),
+        process.env.PATHNOD_OBSERVATION_GENESIS);
+      observationPolicy = new ObservationPolicyService(db, {
+        appID, environment, allowedValidationCategories: categories, allowedBundleVersions: versions,
+      }, { target: `${source.target}/${proof.digest}/${appID}/${environment}/${categories.join(",")}/${versions.join(",")}`,
+        snapshot: t => source.snapshot(t) }, proof);
+    }
     const eligibilityRPC = process.env.PATHNOD_ELIGIBILITY_RPC_URL;
     const eligibilityProgram = process.env.PATHNOD_ELIGIBILITY_PROGRAM_ID;
     const eligibilityProtocol = process.env.PATHNOD_ELIGIBILITY_PROTOCOL_ID;
@@ -166,16 +200,17 @@ async function main(): Promise<void> {
       });
       publisher.start();
     }
-  } catch (error) { service.close(); gate.close(); throw error; }
+  } catch (error) { observationPolicy?.close(); service.close(); gate.close(); throw error; }
   const inbox = receiptDB ? new DevelopmentObservationInbox(receiptDB) : undefined;
-  const server = createEnrollmentServer(service, publisher, eligibility, inbox);
+  const server = createEnrollmentServer(service, publisher, eligibility, inbox, observationPolicy);
+  server.requestTimeout = 15_000;
   server.listen(port, host, () => { process.stdout.write(`Enrollment server listening on ${host}:${port}\n`); });
   let closing = false;
   const close = () => {
     if (closing) return;
     closing = true;
     server.close(() => {
-      void (async () => { await publisher?.close(); inbox?.close(); service.close(); gate.close(); })();
+      void (async () => { await publisher?.close(); observationPolicy?.close(); inbox?.close(); service.close(); gate.close(); })();
     });
   };
   process.once("SIGINT", close);
