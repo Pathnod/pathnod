@@ -153,13 +153,23 @@ public enum PoseidonCommitment {
         try hash([first, second, third])
     }
 
+    public static func hashFive(_ first: Data, _ second: Data, _ third: Data, _ fourth: Data, _ fifth: Data) throws -> Data {
+        try hash([first, second, third, fourth, fifth])
+    }
+
     public static func isCanonicalField(_ bytes: Data) -> Bool {
         (try? Field(bytes: bytes)) != nil
     }
 
     private static func hash(_ inputs: [Data]) throws -> Data {
         let width = inputs.count + 1
-        let rounds = inputs.count == 2 ? 65 : 64
+        let rounds: Int
+        switch inputs.count {
+        case 1, 3: rounds = 64
+        case 2: rounds = 65
+        case 5: rounds = 68
+        default: throw ObserverCommitmentError.unavailableParameters
+        }
         guard let url = Bundle.module.url(forResource: "poseidon-t\(width)", withExtension: "json"),
               let parameters = try? JSONDecoder().decode(PoseidonParameters.self, from: Data(contentsOf: url)),
               parameters.parameterSet == "circom-bn254-x5",
