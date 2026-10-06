@@ -42,6 +42,7 @@ jobs:
             tools/device-sim \
             packages/circuits \
             packages/verifier \
+            packages/solana \
             programs/pathnod \
             docs
           do
@@ -167,7 +168,7 @@ jobs:
   anchor:
     name: Anchor SBF build
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 35
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -212,11 +213,52 @@ jobs:
           mkdir -p "$verify_dir"
           git archive HEAD | tar -x -C "$verify_dir"
           cd "$verify_dir"
+          mkdir -p target/deploy
+          solana-keygen new --silent --no-bip39-passphrase --outfile target/deploy/pathnod-keypair.json
+          task_program=$(solana-keygen pubkey target/deploy/pathnod-keypair.json)
+          python3 - "$task_program" <<'PY'
+          import pathlib, sys
+          for name in ["Anchor.toml", "programs/pathnod/src/lib.rs"]:
+              p = pathlib.Path(name)
+              p.write_text(p.read_text().replace("5V9pXQN5dQkRBSTsaezBg6qLRC3mbLj21Ny3j7xtuHTd", sys.argv[1]))
+          PY
           anchor build --tools-version v1.57 --arch v3
           test -s target/deploy/pathnod.so
           test -s target/idl/pathnod.json
           solana --version
           [[ "$(solana --version)" == solana-cli\ 4.2.2* ]]
+
+      - name: Install Node.js for registry integration tests
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
+
+      - name: Test registry instructions on a local validator
+        shell: bash
+        run: |
+          set -euo pipefail
+          corepack enable
+          pnpm install --frozen-lockfile
+          verify_dir="$RUNNER_TEMP/pathnod-anchor-build"
+          task_wallet="$RUNNER_TEMP/dev27-wallet.json"
+          task_program=$(solana-keygen pubkey "$verify_dir/target/deploy/pathnod-keypair.json")
+          solana-keygen new --silent --no-bip39-passphrase --outfile "$task_wallet"
+          solana-test-validator --ledger "$RUNNER_TEMP/dev27-ledger" \
+            --rpc-port 18899 --faucet-port 18902 --dynamic-port-range 19000-19040 \
+            --bind-address 127.0.0.1 --quiet > "$RUNNER_TEMP/dev27-validator.log" 2>&1 &
+          task_validator_pid=$!
+          trap 'kill "$task_validator_pid" || true' EXIT
+          for attempt in $(seq 1 60); do
+            if solana cluster-version --url http://127.0.0.1:18899; then break; fi
+            sleep 1
+          done
+          solana airdrop 20 --url http://127.0.0.1:18899 --keypair "$task_wallet"
+          solana program deploy "$verify_dir/target/deploy/pathnod.so" \
+            --program-id "$verify_dir/target/deploy/pathnod-keypair.json" \
+            --url http://127.0.0.1:18899 --keypair "$task_wallet" --use-rpc
+          pnpm --filter @pathnod/solana registry:verify \
+            --rpc http://127.0.0.1:18899 --wallet "$task_wallet" --program "$task_program" \
+            --report "$RUNNER_TEMP/dev27-registry-report.json"
 
       - name: Ensure the checkout remains unchanged
         run: git diff --exit-code
