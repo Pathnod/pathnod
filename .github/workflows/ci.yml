@@ -233,7 +233,7 @@ jobs:
         with:
           node-version-file: .node-version
 
-      - name: Test registry and enrollment publication on a local validator
+      - name: Test registry, root publication and eligibility on a local validator
         shell: bash
         run: |
           set -euo pipefail
@@ -267,6 +267,10 @@ jobs:
             --rpc http://127.0.0.1:18899 --program "$task_program" --wallet "$task_publisher" \
             --database "$RUNNER_TEMP/dev28-enrollment.sqlite" --synthetic yes \
             --report "$RUNNER_TEMP/dev28-root-report.json"
+          pnpm --filter @pathnod/verifier eligibility:verify \
+            --rpc http://127.0.0.1:18899 --registry-report "$RUNNER_TEMP/dev27-registry-report.json" \
+            --database "$RUNNER_TEMP/dev29-enrollment.sqlite" \
+            --report "$RUNNER_TEMP/dev29-eligibility-report.json"
 
       - name: Ensure the checkout remains unchanged
         run: git diff --exit-code

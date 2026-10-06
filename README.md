@@ -52,6 +52,8 @@ running system yet.
   [DEV-28](docs/dev28-root-publication.md) adds automatic batched root publication,
   durable retries and chain-checked publication status, validated on devnet with
   the recorded iPhone enrollment root.
+  [DEV-29](docs/dev29-device-eligibility.md) adds public device-slot eligibility
+  queries backed by the protocol/device registry and optional epoch counters.
 - `apps/ios` holds a Swift package for the density study, challenge protocol,
   and `PathnodAppAttest` client. The
   [App Attest spike](apps/ios/AppAttestSpike/README.md) exercises Apple's
@@ -117,6 +119,7 @@ artifacts, or build output.
 - [DEV-26 observer enrollment service](docs/dev26-observer-enrollment-service.md)
 - [DEV-27 protocol and device registry](docs/dev27-protocol-registry.md)
 - [DEV-28 batched observer-root publication](docs/dev28-root-publication.md)
+- [DEV-29 device observation-slot eligibility](docs/dev29-device-eligibility.md)
 
 ## Contributing
 

@@ -92,7 +92,7 @@ changed no existing records. A fifth publication evicts the first root from the
 active window while preserving its immutable account.
 
 CI builds the SBF program and IDL with the pinned toolchain and runs this harness
-on an Agave 4.2.2 local validator. Six SDK tests cover the BLE identity vector,
+on an Agave 4.2.2 local validator. SDK tests cover the BLE identity vector,
 seed scope, field bounds, compact optional data and root-window decoding.
 Rust tests also check the BLE identity vector and account allocations.
 

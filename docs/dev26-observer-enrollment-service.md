@@ -110,6 +110,10 @@ on-chain publication status to that response; the local root may still be
 pending. See the [publication runbook](dev28-root-publication.md) for the signer,
 batch settings, recovery behavior and published-root checks.
 
+DEV-29 adds the public `GET /devices/{id}/slots?epoch=` route to the same server.
+See the [eligibility runbook](dev29-device-eligibility.md) for chain configuration,
+the default protocol and the slot-counter read contract.
+
 ## Verification
 
 `pnpm --filter @pathnod/verifier test` checks challenge expiry, consumption,

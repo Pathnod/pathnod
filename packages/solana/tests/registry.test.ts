@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { PublicKey } from "@solana/web3.js";
 import {
-  BN254_MODULUS, activeRoots, decodeDevice, decodeEnrollment, decodeRoot, deviceId,
+  BN254_MODULUS, activeRoots, decodeDevice, decodeDeviceEpoch, decodeEnrollment, decodeRoot, deviceId,
   discriminator, fieldBytes, publishRoot, registryAddresses,
 } from "../src/index.ts";
 
@@ -12,6 +12,26 @@ test("device ID uses the BLE domain separator and the full 32-byte key", () => {
   const key = Buffer.from("5838894a70843a937976156cb1183f8635840f1de06c011dbea12826efbf30ce", "hex");
   assert.equal(deviceId(key).toString("hex"), "2b52d036962219b5195412a33950044c747666eac5d9e88ddfa39dc613b049b8");
   assert.throws(() => deviceId(key.subarray(0, 31)), /32 bytes/);
+});
+
+test("device epoch seeds bind protocol, device and a canonical little-endian u32", () => {
+  const addresses = registryAddresses(program, Buffer.alloc(32, 1)), device = Buffer.alloc(32, 2);
+  assert.equal(addresses.epoch(device, 42).toBase58(), "MrtNz6EiRTz1bHXD7T3qLaPhm1awvhoUDuVJgrLxaFt");
+  assert.ok(!addresses.epoch(device, 42).equals(addresses.epoch(device, 43)));
+  assert.ok(!addresses.epoch(device, 42).equals(addresses.epoch(Buffer.alloc(32, 3), 42)));
+  for (const value of [-1, 1.5, 2 ** 32]) assert.throws(() => addresses.epoch(device, value), /Invalid u32/);
+});
+
+test("DeviceEpoch reads the spec counters and commitments with exact allocation", () => {
+  const data = Buffer.alloc(75); discriminator("account", "DeviceEpoch").copy(data);
+  data.writeUInt16LE(65535, 8); data[10] = 255;
+  data.fill(1, 11, 43); data.fill(2, 43, 75);
+  const state = decodeDeviceEpoch(data);
+  assert.equal(state.independentObservers, 65535); assert.equal(state.paidSlotsUsed, 255);
+  assert.deepEqual(state.observationRoot, Buffer.alloc(32, 1));
+  assert.deepEqual(state.confidenceCommitment, Buffer.alloc(32, 2));
+  assert.throws(() => decodeDeviceEpoch(data.subarray(0, 74)), /Invalid DeviceEpoch/);
+  data[0] = data[0]! ^ 1; assert.throws(() => decodeDeviceEpoch(data), /Invalid DeviceEpoch/);
 });
 
 test("device addresses are isolated by protocol, while roots are global", () => {

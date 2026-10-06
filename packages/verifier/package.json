@@ -27,7 +27,8 @@
     "typecheck": "tsc --project tsconfig.json",
     "test": "node --test tests/*.test.ts",
     "enrollment:serve": "node dist/enrollment-http.js",
-    "roots:verify": "node scripts/dev28-roots.ts"
+    "roots:verify": "node scripts/dev28-roots.ts",
+    "eligibility:verify": "node scripts/dev29-eligibility.ts"
   },
   "dependencies": {
     "@pathnod/solana": "workspace:*",
