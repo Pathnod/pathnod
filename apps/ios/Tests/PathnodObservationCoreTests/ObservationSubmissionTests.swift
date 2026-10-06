@@ -133,4 +133,38 @@ final class ObservationSubmissionTests: XCTestCase {
         XCTAssertThrowsError(try ObservationOutbox(url: file).entries())
         XCTAssertEqual(try Data(contentsOf: file), Data("{}".utf8))
     }
+    @MainActor func testValidatedReceiptPersistsDistinctStatusAndRejectsContradictoryReceipts() async throws {
+        let (capture, credential, path, _) = try input()
+        let e = try await ObservationSubmission.prepare(capture: capture, credential: credential, enrollment: path,
+            prover: SubmissionProver(), attester: SubmissionAttester())
+        let endpoint = URL(string: "https://verifier.example/observations")!
+        let hash = try e.hashHex()
+        for (status, validated) in [("received", true), ("validated", false), ("paid", true)] {
+            let client = try ObservationHTTPClient(baseURL: endpoint.deletingLastPathComponent()) { _ in
+                let body: [String: Any] = ["status": status, "policy_validated": validated, "transcript_hash": hash]
+                return (try JSONSerialization.data(withJSONObject: body),
+                    HTTPURLResponse(url: endpoint, statusCode: 202, httpVersion: nil, headerFields: nil)!)
+            }
+            do { _ = try await client.send(e); XCTFail("contradictory receipt accepted") }
+            catch { XCTAssertEqual(error as? ObservationSubmissionError, .invalidReceipt) }
+        }
+        let dir = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let file = dir.appending(path: "outbox.json"), queue = ObservationOutbox(url: file)
+        try queue.enqueue(e, endpoint: endpoint)
+        // A pre-DEV-33 queue did not have a validated field.
+        var legacy = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: file)) as? [String: Any])
+        legacy.removeValue(forKey: "validated")
+        try JSONSerialization.data(withJSONObject: legacy).write(to: file, options: .atomic)
+        XCTAssertFalse(try queue.wasValidated(hash: hash, endpoint: endpoint))
+        let client = try ObservationHTTPClient(baseURL: endpoint.deletingLastPathComponent()) { _ in
+            (try JSONEncoder().encode(ObservationReceipt(hash: hash, validated: true)),
+                HTTPURLResponse(url: endpoint, statusCode: 202, httpVersion: nil, headerFields: nil)!)
+        }
+        let sent = try await queue.drain(client: client); XCTAssertEqual(sent, 1)
+        let restored = ObservationOutbox(url: file)
+        XCTAssertTrue(try restored.wasReceived(hash: hash, endpoint: endpoint))
+        XCTAssertTrue(try restored.wasValidated(hash: hash, endpoint: endpoint))
+        XCTAssertTrue(try restored.entries().isEmpty)
+    }
 }

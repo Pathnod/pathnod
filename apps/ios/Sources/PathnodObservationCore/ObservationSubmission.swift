@@ -15,7 +15,7 @@ public enum ObservationSubmissionError: Error, Equatable, LocalizedError {
         case .corruptQueue: "The local outbox could not be validated; it was not erased."
         case .alreadyReceived: "This observation was already received by this service."
         case .http(let code): "Verifier returned HTTP \(code)."
-        case .invalidReceipt: "The verifier did not return a matching development receipt."
+        case .invalidReceipt: "The verifier did not return a matching receipt."
         }
     }
 }
@@ -144,7 +144,9 @@ public struct ObservationReceipt: Codable, Sendable, Equatable {
     public let status: String
     public let transcript_hash: String
     public let policy_validated: Bool
-    public init(hash: String) { status = "received"; transcript_hash = hash; policy_validated = false }
+    public init(hash: String, validated: Bool = false) {
+        status = validated ? "validated" : "received"; transcript_hash = hash; policy_validated = validated
+    }
 }
 
 @MainActor public protocol ObservationProver {
@@ -201,7 +203,8 @@ public struct ObservationReceipt: Codable, Sendable, Equatable {
         guard response.url == endpoint else { throw ObservationSubmissionError.invalidReceipt }
         guard response.statusCode == 202 else { throw ObservationSubmissionError.http(response.statusCode) }
         guard bytes.count <= 4096, let receipt = try? JSONDecoder().decode(ObservationReceipt.self, from: bytes),
-              receipt.status == "received", !receipt.policy_validated, receipt.transcript_hash == (try envelope.hashHex())
+              ((receipt.status == "received" && !receipt.policy_validated) ||
+               (receipt.status == "validated" && receipt.policy_validated)), receipt.transcript_hash == (try envelope.hashHex())
         else { throw ObservationSubmissionError.invalidReceipt }
         return receipt
     }
@@ -229,6 +232,8 @@ private final class ObservationNoRedirects: NSObject, URLSessionTaskDelegate {
         var version = 0
         var pending: [Entry] = []
         var received: [String] = []
+        // Optional preserves compatibility with existing DEV-32 queue files.
+        var validated: [String]? = nil
     }
     public init(url: URL) { self.url = url }
 
@@ -238,6 +243,10 @@ private final class ObservationNoRedirects: NSObject, URLSessionTaskDelegate {
         try load().received.contains(endpoint.absoluteString + ":" + hash)
     }
 
+    public func wasValidated(hash: String, endpoint: URL) throws -> Bool {
+        try load().validated?.contains(endpoint.absoluteString + ":" + hash) ?? false
+    }
+
     private func load() throws -> State {
         guard FileManager.default.fileExists(atPath: url.path) else { return State() }
         do {
@@ -245,7 +254,9 @@ private final class ObservationNoRedirects: NSObject, URLSessionTaskDelegate {
             guard data.count <= 8_388_608 else { throw ObservationSubmissionError.corruptQueue }
             let state = try JSONDecoder().decode(State.self, from: data)
             guard state.version == 0, state.pending.count <= 128, state.received.count <= 1024,
-                  state.received.allSatisfy({ $0.utf8.count <= 4096 }) else { throw ObservationSubmissionError.corruptQueue }
+                  state.received.allSatisfy({ $0.utf8.count <= 4096 }),
+                  (state.validated?.count ?? 0) <= 1024,
+                  (state.validated ?? []).allSatisfy({ state.received.contains($0) }) else { throw ObservationSubmissionError.corruptQueue }
             for entry in state.pending {
                 try entry.envelope.validate()
                 guard entry.attempts >= 0, entry.attempts <= 64 else { throw ObservationSubmissionError.corruptQueue }
@@ -271,8 +282,9 @@ private final class ObservationNoRedirects: NSObject, URLSessionTaskDelegate {
         for entry in snapshot where entry.endpoint == client.endpoint && !entry.rejected && entry.nextAttempt <= now {
             try Task.checkCancellation()
             let hash = try entry.envelope.hashHex()
+            let receipt: ObservationReceipt
             do {
-                _ = try await client.send(entry.envelope)
+                receipt = try await client.send(entry.envelope)
             } catch {
                 if error is CancellationError { throw error }
                 var pending = try entries()
@@ -291,6 +303,8 @@ private final class ObservationNoRedirects: NSObject, URLSessionTaskDelegate {
             var state = try load(); state.pending = pending
             state.received.append(entry.endpoint.absoluteString + ":" + hash)
             state.received = Array(state.received.suffix(1024))
+            if receipt.policy_validated { state.validated = (state.validated ?? []) + [entry.endpoint.absoluteString + ":" + hash] }
+            state.validated = (state.validated ?? []).filter { state.received.contains($0) }
             try saveState(state); received += 1
         }
         return received
