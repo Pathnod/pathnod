@@ -14,6 +14,8 @@
     <key>LSRequiresIPhoneOS</key><true/>
     <key>NSBluetoothAlwaysUsageDescription</key><string>Pathnod uses Bluetooth while this app is open to test three signed challenges with a Pathnod development device.</string>
     <key>NSLocalNetworkUsageDescription</key><string>Pathnod connects to the local development enrollment server.</string>
+    <key>NSLocationWhenInUseUsageDescription</key><string>With your permission, Pathnod includes only an approximate six-character geohash and GPS accuracy in the local observation session.</string>
+    <key>NSMotionUsageDescription</key><string>With your permission, Pathnod includes a coarse motion class and barometer pressure in the local observation session.</string>
     <key>NSAppTransportSecurity</key>
     <dict><key>NSAllowsLocalNetworking</key><true/></dict>
     <key>UIApplicationSceneManifest</key>

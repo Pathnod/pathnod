@@ -10,6 +10,8 @@ public struct ChallengeResult: Sendable {
     public let roundTripMilliseconds: Double
     public let transport: ResponseTransport
     public let deviceCounter: UInt32
+    public let challenge: DeviceProtocolV0.Challenge
+    public let response: DeviceProtocolV0.Response
 }
 
 /// Runs three sequential exchanges using caller-provided monotonic timestamps.
@@ -109,7 +111,8 @@ public struct ChallengeSession {
             attempt: results.count + 1,
             roundTripMilliseconds: (receivedAt - pending.startedAt) * 1_000,
             transport: transport,
-            deviceCounter: response.deviceCounter
+            deviceCounter: response.deviceCounter,
+            challenge: pending.challenge, response: response
         )
         acceptedResponses.insert(wireData)
         results.append(result)

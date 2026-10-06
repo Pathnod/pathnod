@@ -13,6 +13,7 @@ let package = Package(
         .library(name: "PathnodDensityCore", targets: ["PathnodDensityCore"]),
         .library(name: "PathnodChallengeCore", targets: ["PathnodChallengeCore"]),
         .library(name: "PathnodObserverEnrollment", targets: ["PathnodObserverEnrollment"]),
+        .library(name: "PathnodObservationCore", targets: ["PathnodObservationCore"]),
     ],
     targets: [
         .target(name: "PathnodAppAttest"),
@@ -32,5 +33,7 @@ let package = Package(
         ),
         .target(name: "PathnodObserverEnrollment", resources: [.process("Resources")]),
         .testTarget(name: "PathnodObserverEnrollmentTests", dependencies: ["PathnodObserverEnrollment"]),
+        .target(name: "PathnodObservationCore", dependencies: ["PathnodChallengeCore", "PathnodObserverEnrollment"]),
+        .testTarget(name: "PathnodObservationCoreTests", dependencies: ["PathnodObservationCore"]),
     ]
 )

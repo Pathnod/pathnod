@@ -149,6 +149,10 @@ public enum PoseidonCommitment {
         try hash([first, second])
     }
 
+    public static func hashThree(_ first: Data, _ second: Data, _ third: Data) throws -> Data {
+        try hash([first, second, third])
+    }
+
     public static func isCanonicalField(_ bytes: Data) -> Bool {
         (try? Field(bytes: bytes)) != nil
     }

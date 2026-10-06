@@ -65,8 +65,10 @@ export function createEnrollmentServer(service: ObserverEnrollmentService, publi
             throw new EligibilityError("invalid_input");
           }
           if (!eligibility) { send(response, 503, { error: "eligibility_unavailable" }); return; }
-          send(response, 200, await eligibility.slots(url.pathname.split("/")[2], url.searchParams.get("epoch"),
-            url.searchParams.get("protocol_id") ?? undefined));
+          const quote = await eligibility.quote(url.pathname.split("/")[2], url.searchParams.get("epoch"),
+            url.searchParams.get("protocol_id") ?? undefined);
+          response.setHeader("x-pathnod-epoch-seconds", String(quote.epochSeconds));
+          send(response, 200, quote.slots);
         }
       } else if (request.method === "POST" && url.pathname === "/enroll/challenge") {
         const input = await body(request, ["commitment", "keyID"]);

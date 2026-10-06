@@ -26,6 +26,9 @@
 		D10000000000000000000203 /* ObserverEnrollmentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D10000000000000000000103 /* ObserverEnrollmentView.swift */; };
 		D10000000000000000000204 /* ObserverEnrollmentClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = D10000000000000000000104 /* ObserverEnrollmentClient.swift */; };
 		D10000000000000000000210 /* ChallengeScanAppTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D10000000000000000000110 /* ChallengeScanAppTests.swift */; };
+		D10000000000000000000205 /* ObservationSensors.swift in Sources */ = {isa = PBXBuildFile; fileRef = D10000000000000000000105 /* ObservationSensors.swift */; };
+		D10000000000000000000206 /* ObservationSessionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D10000000000000000000106 /* ObservationSessionView.swift */; };
+		D10000000000000000000069 /* PathnodObservationCore in Frameworks */ = {isa = PBXBuildFile; productRef = D1000000000000000000006A /* PathnodObservationCore */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -63,6 +66,8 @@
 		D10000000000000000000103 /* ObserverEnrollmentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ObserverEnrollmentView.swift; sourceTree = "<group>"; };
 		D10000000000000000000104 /* ObserverEnrollmentClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ObserverEnrollmentClient.swift; sourceTree = "<group>"; };
 		D10000000000000000000110 /* ChallengeScanAppTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChallengeScanAppTests.swift; sourceTree = "<group>"; };
+		D10000000000000000000105 /* ObservationSensors.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ObservationSensors.swift; sourceTree = "<group>"; };
+		D10000000000000000000106 /* ObservationSessionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ObservationSessionView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -89,6 +94,7 @@
 				D10000000000000000000062 /* PathnodChallengeCore in Frameworks */,
 				D10000000000000000000066 /* PathnodObserverEnrollment in Frameworks */,
 				D10000000000000000000068 /* PathnodAppAttest in Frameworks */,
+				D10000000000000000000069 /* PathnodObservationCore in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -162,6 +168,8 @@
 				D10000000000000000000102 /* ChallengeBLEController.swift */,
 				D10000000000000000000103 /* ObserverEnrollmentView.swift */,
 				D10000000000000000000104 /* ObserverEnrollmentClient.swift */,
+				D10000000000000000000106 /* ObservationSessionView.swift */,
+				D10000000000000000000105 /* ObservationSensors.swift */,
 			);
 			path = ChallengeScan;
 			sourceTree = "<group>";
@@ -233,6 +241,7 @@
 				D10000000000000000000061 /* PathnodChallengeCore */,
 				D10000000000000000000065 /* PathnodObserverEnrollment */,
 				D10000000000000000000067 /* PathnodAppAttest */,
+				D1000000000000000000006A /* PathnodObservationCore */,
 			);
 			productName = PathnodChallengeScan;
 			productReference = D10000000000000000000020 /* PathnodChallengeScan.app */;
@@ -349,6 +358,8 @@
 				D10000000000000000000202 /* ChallengeBLEController.swift in Sources */,
 				D10000000000000000000203 /* ObserverEnrollmentView.swift in Sources */,
 				D10000000000000000000204 /* ObserverEnrollmentClient.swift in Sources */,
+				D10000000000000000000206 /* ObservationSessionView.swift in Sources */,
+				D10000000000000000000205 /* ObservationSensors.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -577,6 +588,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = App/ChallengeScan/ChallengeScan.entitlements;
+				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks @loader_path/Frameworks";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				GENERATE_INFOPLIST_FILE = NO;
@@ -593,6 +605,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = App/ChallengeScan/ChallengeScan.entitlements;
+				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks @loader_path/Frameworks";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				GENERATE_INFOPLIST_FILE = NO;
@@ -717,6 +730,7 @@
 			isa = XCSwiftPackageProductDependency;
 			productName = PathnodAppAttest;
 		};
+		D1000000000000000000006A /* PathnodObservationCore */ = {isa = XCSwiftPackageProductDependency; productName = PathnodObservationCore; };
 /* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = D08000000000000000000001 /* Project object */;
