@@ -71,7 +71,7 @@ export function createEnrollmentServer(service: ObserverEnrollmentService): Serv
       }
     } catch (error) {
       if (error instanceof EnrollmentError) {
-        const status = error.code === "unknown_observer" ? 404 :
+        const status = error.code === "challenge_limit" ? 429 : error.code === "unknown_observer" ? 404 :
           error.code === "already_enrolled" ? 409 : error.code === "tree_full" ? 507 : 400;
         send(response, status, {
           error: error.code,
@@ -101,8 +101,9 @@ async function main(): Promise<void> {
   }
   const gate = new AppAttestGate(db, {
     appID, environment, allowedValidationCategories: categories, allowedBundleVersions: versions,
-  });
-  const service = await ObserverEnrollmentService.open(db, gate);
+  }, { maxPendingChallenges: Number(process.env.PATHNOD_PENDING_CHALLENGE_LIMIT ?? "1024") });
+  const service = await ObserverEnrollmentService.open(db, gate,
+    { maxPendingChallenges: Number(process.env.PATHNOD_PENDING_CHALLENGE_LIMIT ?? "1024") });
   const server = createEnrollmentServer(service);
   server.listen(port, host, () => { process.stdout.write(`Enrollment server listening on ${host}:${port}\n`); });
   const close = () => server.close(() => { service.close(); gate.close(); });

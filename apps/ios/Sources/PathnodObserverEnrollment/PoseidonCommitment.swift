@@ -25,7 +25,7 @@ private struct Field: Equatable {
         }
         let value = Field(unchecked: words)
         guard value < Self.modulus else { throw ObserverCommitmentError.invalidFieldElement }
-        self = value
+        self = Self.montgomery(value, Self.rSquared)
     }
 
     init(hex: String) throws {
@@ -46,6 +46,9 @@ private struct Field: Equatable {
     }
 
     static let zero = Field(unchecked: [0, 0, 0, 0])
+    private static let rSquared = Field(unchecked: [
+        0x1bb8e645ae216da7, 0x53fe3ab1e35c59e3, 0x8c49833d53bb8085, 0x0216d0b17f4e44a5,
+    ])
 
     static func < (lhs: Field, rhs: Field) -> Bool {
         for index in (0..<4).reversed() {
@@ -82,17 +85,35 @@ private struct Field: Equatable {
     }
 
     static func * (lhs: Field, rhs: Field) -> Field {
-        var result = Field.zero
-        var addend = lhs
-        for word in rhs.limbs {
-            var bits = word
-            for _ in 0..<64 {
-                if bits & 1 == 1 { result = result + addend }
-                bits >>= 1
-                addend = addend + addend
+        montgomery(lhs, rhs)
+    }
+
+    // Four-limb Montgomery reduction keeps multiplication bounded without
+    // the 256-bit repeated-doubling loop used by the initial commitment spike.
+    private static func montgomery(_ lhs: Field, _ rhs: Field) -> Field {
+        var words = [UInt64](repeating: 0, count: 9)
+        func add(_ value: UInt64, at index: Int) {
+            var position = index, carry = value
+            while carry != 0 {
+                let (sum, overflow) = words[position].addingReportingOverflow(carry)
+                words[position] = sum; carry = overflow ? 1 : 0; position += 1
             }
         }
-        return result
+        for i in 0..<4 {
+            for j in 0..<4 {
+                let product = lhs.limbs[i].multipliedFullWidth(by: rhs.limbs[j])
+                add(product.low, at: i + j); add(product.high, at: i + j + 1)
+            }
+        }
+        for i in 0..<4 {
+            let factor = words[i] &* 0xc2e1f593efffffff
+            for j in 0..<4 {
+                let product = factor.multipliedFullWidth(by: modulus.limbs[j])
+                add(product.low, at: i + j); add(product.high, at: i + j + 1)
+            }
+        }
+        let result = Field(unchecked: Array(words[4..<8]))
+        return result < modulus ? result : result.subtracting(modulus)
     }
 
     func fifthPower() -> Field {
@@ -102,7 +123,8 @@ private struct Field: Equatable {
 
     var bytes: Data {
         var result = Data()
-        for word in limbs.reversed() {
+        let canonical = Self.montgomery(self, Field(unchecked: [1, 0, 0, 0]))
+        for word in canonical.limbs.reversed() {
             for shift in stride(from: 56, through: 0, by: -8) {
                 result.append(UInt8(truncatingIfNeeded: word >> shift))
             }
@@ -120,27 +142,40 @@ private struct PoseidonParameters: Decodable {
 
 public enum PoseidonCommitment {
     public static func hashOne(_ input: Data) throws -> Data {
-        let value = try Field(bytes: input)
-        guard let url = Bundle.module.url(forResource: "poseidon-t2", withExtension: "json"),
+        try hash([input])
+    }
+
+    public static func hashTwo(_ first: Data, _ second: Data) throws -> Data {
+        try hash([first, second])
+    }
+
+    public static func isCanonicalField(_ bytes: Data) -> Bool {
+        (try? Field(bytes: bytes)) != nil
+    }
+
+    private static func hash(_ inputs: [Data]) throws -> Data {
+        let width = inputs.count + 1
+        let rounds = inputs.count == 2 ? 65 : 64
+        guard let url = Bundle.module.url(forResource: "poseidon-t\(width)", withExtension: "json"),
               let parameters = try? JSONDecoder().decode(PoseidonParameters.self, from: Data(contentsOf: url)),
               parameters.parameterSet == "circom-bn254-x5",
-              parameters.arity == 1,
-              parameters.roundConstants.count == 128,
-              parameters.mds.count == 2,
-              parameters.mds.allSatisfy({ $0.count == 2 }) else {
+              parameters.arity == inputs.count,
+              parameters.roundConstants.count == rounds * width,
+              parameters.mds.count == width,
+              parameters.mds.allSatisfy({ $0.count == width }) else {
             throw ObserverCommitmentError.unavailableParameters
         }
         let constants = try parameters.roundConstants.map(Field.init(hex:))
         let matrix = try parameters.mds.map { try $0.map(Field.init(hex:)) }
-        var state = [Field.zero, value]
-        for round in 0..<64 {
-            state[0] = state[0] + constants[round * 2]
-            state[1] = state[1] + constants[round * 2 + 1]
-            state[0] = state[0].fifthPower()
-            if round < 4 || round >= 60 { state[1] = state[1].fifthPower() }
-            let next0 = matrix[0][0] * state[0] + matrix[0][1] * state[1]
-            let next1 = matrix[1][0] * state[0] + matrix[1][1] * state[1]
-            state = [next0, next1]
+        var state = [Field.zero] + (try inputs.map(Field.init(bytes:)))
+        for round in 0..<rounds {
+            for index in 0..<width {
+                state[index] = state[index] + constants[round * width + index]
+                if index == 0 || round < 4 || round >= rounds - 4 { state[index] = state[index].fifthPower() }
+            }
+            state = matrix.map { row in
+                zip(row, state).reduce(Field.zero) { $0 + $1.0 * $1.1 }
+            }
         }
         return state[0].bytes
     }

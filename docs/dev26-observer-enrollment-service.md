@@ -44,6 +44,23 @@ assertion is a new App Attest assertion over the new challenge. `GET /root`
 returns the public current root and revision. Path reads require an enrolled
 key and a fresh assertion.
 
+The iPhone validates every returned field as a canonical BN254 scalar, computes
+`leaf = Poseidon(commitment, observerClass)` and recomputes all twenty Merkle
+levels before reporting success. Modified leaves, siblings, roots or directions
+are rejected. The shared validator is exercised with a Circom-compatible valid
+fixture and malformed-response tests; arithmetic optimization preserves the
+existing enrollment vectors and does not claim constant-time execution.
+
+Unused challenges are purged from both challenge tables before issuance and
+consumption. Each table has a default ceiling of **1,024 pending challenges**;
+`PATHNOD_PENDING_CHALLENGE_LIMIT` configures the ceiling (1–100,000). Full capacity
+returns HTTP **429**, `challenge_limit`, without allocating another challenge.
+App Attest trials reserve all three slots atomically. If the enrollment record
+cannot be inserted, its newly allocated gate challenge is discarded.
+Cleanup reuses freed SQLite space; it does not shrink the database file or
+provide an authenticated-client/IP rate limit. Keep the single-writer deployment
+constraint and apply deployment-level admission controls as needed.
+
 Re-enrollment of the same key and commitment requires a fresh assertion,
 returns the current path, and appends a `reenrolled` journal event without
 changing its leaf or root revision. A key cannot replace its commitment; a

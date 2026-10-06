@@ -1,32 +1,7 @@
 import CryptoKit
 import Foundation
 import PathnodAppAttest
-
-struct ObserverMerklePath: Decodable {
-    let commitment: String
-    let observerClass: Int
-    let leaf: String
-    let leafIndex: Int
-    let siblings: [String]
-    let directions: [Int]
-    let root: String
-    let rootRevision: Int
-
-    func validate(expectedCommitment: String) throws {
-        let field = /^0x[0-9a-f]{64}$/
-        guard commitment == expectedCommitment,
-              observerClass == 1,
-              leafIndex >= 0 && leafIndex < (1 << 20),
-              rootRevision > 0,
-              leaf.wholeMatch(of: field) != nil,
-              root.wholeMatch(of: field) != nil,
-              siblings.count == 20,
-              directions.count == 20,
-              siblings.allSatisfy({ $0.wholeMatch(of: field) != nil }),
-              directions.enumerated().allSatisfy({ $0.element == ((leafIndex >> $0.offset) & 1) })
-        else { throw ObserverEnrollmentClientError.invalidResponse }
-    }
-}
+import PathnodObserverEnrollment
 
 enum ObserverEnrollmentClientError: Error, LocalizedError {
     case invalidURL
@@ -90,7 +65,8 @@ struct ObserverEnrollmentClient {
             issued.mode == "attestation" && code.hasPrefix("invalid_attestation") {
             throw ObserverEnrollmentClientError.initialAttestationRejected(code)
         }
-        try path.validate(expectedCommitment: commitment)
+        do { try path.validate(expectedCommitment: commitment) }
+        catch { throw ObserverEnrollmentClientError.invalidResponse }
         return path
     }
 
@@ -110,7 +86,8 @@ struct ObserverEnrollmentClient {
         request.setValue(key.keyID, forHTTPHeaderField: "x-pathnod-key-id")
         request.setValue(assertion.object.base64EncodedString(), forHTTPHeaderField: "x-pathnod-assertion")
         let path: ObserverMerklePath = try await send(request)
-        try path.validate(expectedCommitment: commitment)
+        do { try path.validate(expectedCommitment: commitment) }
+        catch { throw ObserverEnrollmentClientError.invalidResponse }
         return path
     }
 

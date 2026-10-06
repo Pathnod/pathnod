@@ -11,7 +11,7 @@ const CLASS = 1;
 
 export type EnrollmentErrorCode =
   | "invalid_input" | "unknown_observer" | "already_enrolled" | "invalid_challenge"
-  | "invalid_attestation" | "tree_full";
+  | "invalid_attestation" | "tree_full" | "challenge_limit";
 
 export class EnrollmentError extends Error {
   readonly code: EnrollmentErrorCode;
@@ -28,6 +28,8 @@ export interface EnrollmentAttestationGate {
   acceptAttestation(challengeID: string, keyID: string, object: Uint8Array): VerifiedAppAttestKey;
   acceptAssertion(challengeID: string, keyID: string, object: Uint8Array): VerifiedAppAttestKey;
   getKey(keyID: string): VerifiedAppAttestKey | undefined;
+  purgeExpiredChallenges?(): void;
+  discardChallenge?(id: string): void;
 }
 
 export interface EnrollmentChallenge {
@@ -93,9 +95,11 @@ export class ObserverEnrollmentService {
   readonly #gate: EnrollmentAttestationGate;
   readonly #poseidon: Awaited<ReturnType<typeof buildPoseidon>>;
   readonly #empty: string[];
+  readonly #maxPending: number;
 
   private constructor(databasePath: string, gate: EnrollmentAttestationGate,
-    poseidon: Awaited<ReturnType<typeof buildPoseidon>>) {
+    poseidon: Awaited<ReturnType<typeof buildPoseidon>>, maxPending: number) {
+    this.#maxPending = maxPending;
     this.#gate = gate;
     this.#poseidon = poseidon;
     this.#database = new DatabaseSync(databasePath);
@@ -135,6 +139,7 @@ export class ObserverEnrollmentService {
         root_revision INTEGER NOT NULL,
         created_at INTEGER NOT NULL
       );
+      CREATE INDEX IF NOT EXISTS observer_challenge_expiry ON observer_challenges(expires_at);
     `);
     this.#empty = [hex(0n)];
     for (let level = 0; level < DEPTH; level++) {
@@ -146,11 +151,14 @@ export class ObserverEnrollmentService {
     ).run(this.#empty[DEPTH]!, Date.now());
   }
 
-  static async open(databasePath: string, gate: EnrollmentAttestationGate): Promise<ObserverEnrollmentService> {
+  static async open(databasePath: string, gate: EnrollmentAttestationGate,
+    options: { maxPendingChallenges?: number } = {}): Promise<ObserverEnrollmentService> {
+    const limit = options.maxPendingChallenges ?? 1024;
+    if (!Number.isInteger(limit) || limit < 1 || limit > 100_000) throw new EnrollmentError("invalid_input");
     if (typeof databasePath !== "string" || databasePath.length === 0) {
       throw new EnrollmentError("invalid_input");
     }
-    return new ObserverEnrollmentService(databasePath, gate, await buildPoseidon());
+    return new ObserverEnrollmentService(databasePath, gate, await buildPoseidon(), limit);
   }
 
   close(): void { this.#database.close(); }
@@ -254,11 +262,32 @@ export class ObserverEnrollmentService {
 
   #issue(operation: "enroll" | "tree", commitment: string, id: string,
     mode: "attestation" | "assertion"): EnrollmentChallenge {
-    const issued = this.#gate.issueChallenge(mode, mode === "assertion" ? id : undefined);
-    this.#database.prepare(`
-      INSERT INTO observer_challenges (id, operation, commitment, key_id, mode, expires_at)
-      VALUES (?, ?, ?, ?, ?, ?)
-    `).run(issued.id, operation, commitment, id, mode, issued.expiresAt);
+    this.#gate.purgeExpiredChallenges?.();
+    this.#database.prepare("DELETE FROM observer_challenges WHERE expires_at <= ?").run(Date.now());
+    const checkCapacity = () => {
+      const pending = this.#database.prepare("SELECT COUNT(*) AS n FROM observer_challenges").get() as { n: number };
+      if (pending.n >= this.#maxPending) throw new EnrollmentError("challenge_limit");
+    };
+    checkCapacity();
+    let issued: IssuedAppAttestChallenge;
+    try { issued = this.#gate.issueChallenge(mode, mode === "assertion" ? id : undefined); }
+    catch (error) {
+      if (error instanceof AppAttestVerificationError && error.code === "challenge_limit") throw new EnrollmentError("challenge_limit");
+      throw error;
+    }
+    try {
+      this.#database.exec("BEGIN IMMEDIATE");
+      checkCapacity();
+      this.#database.prepare(`
+        INSERT INTO observer_challenges (id, operation, commitment, key_id, mode, expires_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+      `).run(issued.id, operation, commitment, id, mode, issued.expiresAt);
+      this.#database.exec("COMMIT");
+    } catch (error) {
+      if (this.#database.isTransaction) this.#database.exec("ROLLBACK");
+      this.#gate.discardChallenge?.(issued.id);
+      throw error;
+    }
     return { ...issued, mode };
   }
 
@@ -267,6 +296,8 @@ export class ObserverEnrollmentService {
     if (typeof challengeID !== "string" || challengeID.length === 0) {
       throw new EnrollmentError("invalid_challenge");
     }
+    this.#gate.purgeExpiredChallenges?.();
+    this.#database.prepare("DELETE FROM observer_challenges WHERE expires_at <= ?").run(Date.now());
     this.#database.exec("BEGIN IMMEDIATE");
     try {
       const row = this.#database.prepare("SELECT * FROM observer_challenges WHERE id = ?")
@@ -275,6 +306,7 @@ export class ObserverEnrollmentService {
       this.#database.exec("COMMIT");
       if (row === undefined || row.operation !== operation || row.commitment !== commitment ||
           row.key_id !== id || row.expires_at <= Date.now()) {
+        if (row !== undefined) this.#gate.discardChallenge?.(row.id);
         throw new EnrollmentError("invalid_challenge");
       }
       return row;

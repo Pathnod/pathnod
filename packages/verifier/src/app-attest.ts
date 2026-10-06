@@ -9,6 +9,7 @@ export type AppAttestEnvironment = "development" | "production";
 
 export type AppAttestVerificationErrorCode =
   | "invalid_input"
+  | "challenge_limit"
   | "invalid_attestation"
   | "invalid_chain"
   | "invalid_nonce"
