@@ -6,6 +6,7 @@ import { EnrollmentError, ObserverEnrollmentService } from "./observer-enrollmen
 import { ObserverRootPublisher } from "./root-publication.ts";
 import { SolanaRootPublicationTransport } from "./solana-root-publication.ts";
 import { DeviceEligibilityService, EligibilityError } from "./device-eligibility.ts";
+import { DevelopmentObservationInbox, ObservationInboxError } from "./observation-inbox.ts";
 
 const MAX_BODY = 128 * 1024;
 
@@ -14,7 +15,7 @@ function send(response: ServerResponse, status: number, value: unknown): void {
   response.end(JSON.stringify(value));
 }
 
-async function body(request: IncomingMessage, fields: readonly string[]): Promise<Record<string, unknown>> {
+async function body(request: IncomingMessage, fields: readonly string[], optional: readonly string[] = []): Promise<Record<string, unknown>> {
   if (request.headers["content-type"]?.split(";")[0] !== "application/json") throw new EnrollmentError("invalid_input");
   const parts: Buffer[] = [];
   let size = 0;
@@ -27,8 +28,8 @@ async function body(request: IncomingMessage, fields: readonly string[]): Promis
   try {
     const parsed: unknown = JSON.parse(Buffer.concat(parts).toString("utf8"));
     if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) throw Error();
-    if (Object.keys(parsed).length !== fields.length ||
-        Object.keys(parsed).some((key) => !fields.includes(key))) throw Error();
+    if (fields.some(key => !(key in parsed)) ||
+        Object.keys(parsed).some((key) => !fields.includes(key) && !optional.includes(key))) throw Error();
     return parsed as Record<string, unknown>;
   } catch { throw new EnrollmentError("invalid_input"); }
 }
@@ -48,7 +49,7 @@ function challenge(value: ReturnType<ObserverEnrollmentService["issueEnrollmentC
 }
 
 export function createEnrollmentServer(service: ObserverEnrollmentService, publisher?: ObserverRootPublisher,
-  eligibility?: DeviceEligibilityService): Server {
+  eligibility?: DeviceEligibilityService, inbox?: DevelopmentObservationInbox): Server {
   return createServer(async (request, response) => {
     try {
       const url = new URL(request.url ?? "", "http://localhost");
@@ -70,6 +71,16 @@ export function createEnrollmentServer(service: ObserverEnrollmentService, publi
           response.setHeader("x-pathnod-epoch-seconds", String(quote.epochSeconds));
           send(response, 200, quote.slots);
         }
+      } else if (url.pathname === "/observations") {
+        if (request.method !== "POST") {
+          response.setHeader("allow", "POST"); send(response, 405, { error: "method_not_allowed" });
+        } else if (!inbox) {
+          send(response, 503, { error: "observation_receiver_unavailable" });
+        } else if (!["127.0.0.1", "::1", "::ffff:127.0.0.1"].includes(request.socket.remoteAddress ?? "")) {
+          send(response, 403, { error: "development_receiver_local_only" });
+        } else {
+          send(response, 202, await inbox.receive(await body(request, ["transcript", "assertion", "key_id", "zk"], ["evidence"])));
+        }
       } else if (request.method === "POST" && url.pathname === "/enroll/challenge") {
         const input = await body(request, ["commitment", "keyID"]);
         send(response, 200, challenge(service.issueEnrollmentChallenge(input.commitment, input.keyID)));
@@ -88,7 +99,9 @@ export function createEnrollmentServer(service: ObserverEnrollmentService, publi
         send(response, 404, { error: "not_found" });
       }
     } catch (error) {
-      if (error instanceof EligibilityError) {
+      if (error instanceof ObservationInboxError) {
+        send(response, error.code === "receipt_conflict" ? 409 : error.code === "inbox_full" ? 507 : 400, { error: error.code });
+      } else if (error instanceof EligibilityError) {
         send(response, error.code === "invalid_input" ? 400 : error.code === "protocol_unknown" ? 404 : 503, { error: error.code });
       } else if (error instanceof EnrollmentError) {
         const status = error.code === "challenge_limit" ? 429 : error.code === "unknown_observer" ? 404 :
@@ -113,6 +126,10 @@ async function main(): Promise<void> {
   const versions = (process.env.PATHNOD_APP_ATTEST_BUNDLE_VERSIONS ?? "")
     .split(",").filter((value) => value.length > 0);
   const host = process.env.PATHNOD_ENROLLMENT_HOST ?? "127.0.0.1";
+  const receiptDB = process.env.PATHNOD_DEV32_RECEIPT_DB;
+  if (receiptDB && (process.env.NODE_ENV === "production" || !["127.0.0.1", "::1"].includes(host))) {
+    throw Error("DEV-32 receipt sink requires a non-production loopback host.");
+  }
   const port = Number(process.env.PATHNOD_ENROLLMENT_PORT ?? "8787");
   if (!db || !appID || (environment !== "development" && environment !== "production") ||
       !Number.isInteger(port) || port < 1 || port > 65535 ||
@@ -150,14 +167,15 @@ async function main(): Promise<void> {
       publisher.start();
     }
   } catch (error) { service.close(); gate.close(); throw error; }
-  const server = createEnrollmentServer(service, publisher, eligibility);
+  const inbox = receiptDB ? new DevelopmentObservationInbox(receiptDB) : undefined;
+  const server = createEnrollmentServer(service, publisher, eligibility, inbox);
   server.listen(port, host, () => { process.stdout.write(`Enrollment server listening on ${host}:${port}\n`); });
   let closing = false;
   const close = () => {
     if (closing) return;
     closing = true;
     server.close(() => {
-      void (async () => { await publisher?.close(); service.close(); gate.close(); })();
+      void (async () => { await publisher?.close(); inbox?.close(); service.close(); gate.close(); })();
     });
   };
   process.once("SIGINT", close);
