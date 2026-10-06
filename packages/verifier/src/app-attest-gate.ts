@@ -41,8 +41,13 @@ interface KeyRow {
 export class AppAttestGate {
   readonly #database: DatabaseSync;
   readonly #verifier: AppAttestVerifier;
+  readonly #maxPending: number;
 
-  constructor(databasePath: string, policy: AppAttestPolicy) {
+  constructor(databasePath: string, policy: AppAttestPolicy, options: { maxPendingChallenges?: number } = {}) {
+    this.#maxPending = options.maxPendingChallenges ?? 1024;
+    if (!Number.isInteger(this.#maxPending) || this.#maxPending < 1 || this.#maxPending > 100_000) {
+      throw new AppAttestVerificationError("invalid_input");
+    }
     if (typeof databasePath !== "string" || databasePath.length === 0) {
       throw new AppAttestVerificationError("invalid_input");
     }
@@ -67,11 +72,26 @@ export class AppAttestGate {
         validation_category INTEGER,
         bundle_version TEXT
       );
+      CREATE INDEX IF NOT EXISTS app_attest_challenge_expiry ON app_attest_challenges(expires_at);
     `);
   }
 
   close(): void {
     this.#database.close();
+  }
+
+  purgeExpiredChallenges(): void {
+    this.#database.prepare("DELETE FROM app_attest_challenges WHERE expires_at <= ?").run(Date.now());
+  }
+
+  discardChallenge(id: string): void {
+    this.#database.prepare("DELETE FROM app_attest_challenges WHERE id = ?").run(id);
+  }
+
+  #reserve(count: number): void {
+    this.purgeExpiredChallenges();
+    const pending = this.#database.prepare("SELECT COUNT(*) AS n FROM app_attest_challenges").get() as { n: number };
+    if (pending.n + count > this.#maxPending) throw new AppAttestVerificationError("challenge_limit");
   }
 
   issueChallenge(purpose: AppAttestChallengePurpose, keyID?: string): IssuedAppAttestChallenge {
@@ -83,14 +103,24 @@ export class AppAttestGate {
     if (purpose === "assertion" && this.getKey(keyID!) === undefined) {
       throw new AppAttestVerificationError("invalid_key");
     }
+    this.purgeExpiredChallenges();
     const issued = { id: randomUUID(), bytes: randomBytes(32), expiresAt: Date.now() + 5 * 60_000 };
-    this.#database.prepare(
-      "INSERT INTO app_attest_challenges (id, purpose, key_id, bytes, expires_at) VALUES (?, ?, ?, ?, ?)",
-    ).run(issued.id, purpose, keyID ?? null, issued.bytes, issued.expiresAt);
+    this.#database.exec("BEGIN IMMEDIATE");
+    try {
+      this.#reserve(1);
+      this.#database.prepare(
+        "INSERT INTO app_attest_challenges (id, purpose, key_id, bytes, expires_at) VALUES (?, ?, ?, ?, ?)",
+      ).run(issued.id, purpose, keyID ?? null, issued.bytes, issued.expiresAt);
+      this.#database.exec("COMMIT");
+    } catch (error) {
+      if (this.#database.isTransaction) this.#database.exec("ROLLBACK");
+      throw error;
+    }
     return issued;
   }
 
   issueTrial(): IssuedAppAttestTrial {
+    this.purgeExpiredChallenges();
     const session = randomUUID();
     const create = (): IssuedAppAttestChallenge => ({
       id: randomUUID(), bytes: randomBytes(32), expiresAt: Date.now() + 5 * 60_000,
@@ -100,6 +130,7 @@ export class AppAttestGate {
     const secondAssertion = create();
     this.#database.exec("BEGIN IMMEDIATE");
     try {
+      this.#reserve(3);
       const insert = this.#database.prepare(
         "INSERT INTO app_attest_challenges (id, purpose, key_id, trial_id, bytes, expires_at) VALUES (?, ?, NULL, ?, ?, ?)",
       );
@@ -171,6 +202,7 @@ export class AppAttestGate {
     if (typeof id !== "string" || id.length === 0) throw new AppAttestVerificationError("invalid_input");
     this.#database.exec("BEGIN IMMEDIATE");
     try {
+      this.purgeExpiredChallenges();
       const row = this.#database.prepare("SELECT * FROM app_attest_challenges WHERE id = ?").get(id) as ChallengeRow | undefined;
       this.#database.prepare("DELETE FROM app_attest_challenges WHERE id = ?").run(id);
       this.#database.exec("COMMIT");

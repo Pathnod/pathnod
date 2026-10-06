@@ -19,10 +19,12 @@
 		D10000000000000000000062 /* PathnodChallengeCore in Frameworks */ = {isa = PBXBuildFile; productRef = D10000000000000000000061 /* PathnodChallengeCore */; };
 		D10000000000000000000064 /* PathnodChallengeCore in Frameworks */ = {isa = PBXBuildFile; productRef = D10000000000000000000063 /* PathnodChallengeCore */; };
 		D10000000000000000000066 /* PathnodObserverEnrollment in Frameworks */ = {isa = PBXBuildFile; productRef = D10000000000000000000065 /* PathnodObserverEnrollment */; };
+		D10000000000000000000068 /* PathnodAppAttest in Frameworks */ = {isa = PBXBuildFile; productRef = D10000000000000000000067 /* PathnodAppAttest */; };
 		D10000000000000000000200 /* PathnodChallengeScanApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = D10000000000000000000100 /* PathnodChallengeScanApp.swift */; };
 		D10000000000000000000201 /* ChallengeScanView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D10000000000000000000101 /* ChallengeScanView.swift */; };
 		D10000000000000000000202 /* ChallengeBLEController.swift in Sources */ = {isa = PBXBuildFile; fileRef = D10000000000000000000102 /* ChallengeBLEController.swift */; };
 		D10000000000000000000203 /* ObserverEnrollmentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D10000000000000000000103 /* ObserverEnrollmentView.swift */; };
+		D10000000000000000000204 /* ObserverEnrollmentClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = D10000000000000000000104 /* ObserverEnrollmentClient.swift */; };
 		D10000000000000000000210 /* ChallengeScanAppTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D10000000000000000000110 /* ChallengeScanAppTests.swift */; };
 /* End PBXBuildFile section */
 
@@ -59,6 +61,7 @@
 		D10000000000000000000101 /* ChallengeScanView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChallengeScanView.swift; sourceTree = "<group>"; };
 		D10000000000000000000102 /* ChallengeBLEController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChallengeBLEController.swift; sourceTree = "<group>"; };
 		D10000000000000000000103 /* ObserverEnrollmentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ObserverEnrollmentView.swift; sourceTree = "<group>"; };
+		D10000000000000000000104 /* ObserverEnrollmentClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ObserverEnrollmentClient.swift; sourceTree = "<group>"; };
 		D10000000000000000000110 /* ChallengeScanAppTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChallengeScanAppTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -85,6 +88,7 @@
 			files = (
 				D10000000000000000000062 /* PathnodChallengeCore in Frameworks */,
 				D10000000000000000000066 /* PathnodObserverEnrollment in Frameworks */,
+				D10000000000000000000068 /* PathnodAppAttest in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -157,6 +161,7 @@
 				D10000000000000000000101 /* ChallengeScanView.swift */,
 				D10000000000000000000102 /* ChallengeBLEController.swift */,
 				D10000000000000000000103 /* ObserverEnrollmentView.swift */,
+				D10000000000000000000104 /* ObserverEnrollmentClient.swift */,
 			);
 			path = ChallengeScan;
 			sourceTree = "<group>";
@@ -227,6 +232,7 @@
 			packageProductDependencies = (
 				D10000000000000000000061 /* PathnodChallengeCore */,
 				D10000000000000000000065 /* PathnodObserverEnrollment */,
+				D10000000000000000000067 /* PathnodAppAttest */,
 			);
 			productName = PathnodChallengeScan;
 			productReference = D10000000000000000000020 /* PathnodChallengeScan.app */;
@@ -342,6 +348,7 @@
 				D10000000000000000000201 /* ChallengeScanView.swift in Sources */,
 				D10000000000000000000202 /* ChallengeBLEController.swift in Sources */,
 				D10000000000000000000203 /* ObserverEnrollmentView.swift in Sources */,
+				D10000000000000000000204 /* ObserverEnrollmentClient.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -569,15 +576,11 @@
 		D10000000000000000000052 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = App/ChallengeScan/ChallengeScan.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_CFBundleDisplayName = "Pathnod S1";
-				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "Pathnod uses Bluetooth while this app is open to test three signed challenges with a Pathnod development device.";
-				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
-				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
-				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
-				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = App/ChallengeScan/ChallengeScan-Info.plist;
 				MARKETING_VERSION = 0.1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = xyz.pathnod.challengescan;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -589,15 +592,11 @@
 		D10000000000000000000053 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = App/ChallengeScan/ChallengeScan.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_CFBundleDisplayName = "Pathnod S1";
-				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "Pathnod uses Bluetooth while this app is open to test three signed challenges with a Pathnod development device.";
-				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
-				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
-				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
-				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = App/ChallengeScan/ChallengeScan-Info.plist;
 				MARKETING_VERSION = 0.1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = xyz.pathnod.challengescan;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -713,6 +712,10 @@
 		D10000000000000000000065 /* PathnodObserverEnrollment */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = PathnodObserverEnrollment;
+		};
+		D10000000000000000000067 /* PathnodAppAttest */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = PathnodAppAttest;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

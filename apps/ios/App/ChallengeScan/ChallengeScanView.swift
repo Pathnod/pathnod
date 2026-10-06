@@ -9,10 +9,10 @@ struct ChallengeScanView: View {
         NavigationStack {
             List {
                 Section("Observer enrollment") {
-                    NavigationLink("Preview public commitment") {
+                    NavigationLink("Enroll observer") {
                         ObserverEnrollmentView()
                     }
-                    Text("Review the public value before enrollment. No observer secret is sent from this screen.")
+                    Text("Create a private observer secret, review its public commitment, and request a Merkle path from the enrollment service.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }

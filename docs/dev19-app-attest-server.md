@@ -5,8 +5,9 @@ server library validates a real attestation against the pinned [Apple App
 Attestation Root CA](https://www.apple.com/certificateauthority/private/),
 then uses the certified P-256 key to validate assertions. It stores one-time
 challenges, the verified public key, and the last assertion counter in SQLite.
-The iPhone harness remains a development tool; the observer app and an HTTP
-endpoint are not wired to this gate yet.
+The original iPhone harness remains a development tool.
+[DEV-26](dev26-observer-enrollment-service.md) connects the observer app and
+enrollment HTTP endpoints to this gate.
 
 ## Checks
 
