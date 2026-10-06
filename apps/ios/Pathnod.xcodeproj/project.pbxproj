@@ -18,9 +18,11 @@
 		D08000000000000000000210 /* DensityScanAppTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D08000000000000000000110 /* DensityScanAppTests.swift */; };
 		D10000000000000000000062 /* PathnodChallengeCore in Frameworks */ = {isa = PBXBuildFile; productRef = D10000000000000000000061 /* PathnodChallengeCore */; };
 		D10000000000000000000064 /* PathnodChallengeCore in Frameworks */ = {isa = PBXBuildFile; productRef = D10000000000000000000063 /* PathnodChallengeCore */; };
+		D10000000000000000000066 /* PathnodObserverEnrollment in Frameworks */ = {isa = PBXBuildFile; productRef = D10000000000000000000065 /* PathnodObserverEnrollment */; };
 		D10000000000000000000200 /* PathnodChallengeScanApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = D10000000000000000000100 /* PathnodChallengeScanApp.swift */; };
 		D10000000000000000000201 /* ChallengeScanView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D10000000000000000000101 /* ChallengeScanView.swift */; };
 		D10000000000000000000202 /* ChallengeBLEController.swift in Sources */ = {isa = PBXBuildFile; fileRef = D10000000000000000000102 /* ChallengeBLEController.swift */; };
+		D10000000000000000000203 /* ObserverEnrollmentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D10000000000000000000103 /* ObserverEnrollmentView.swift */; };
 		D10000000000000000000210 /* ChallengeScanAppTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D10000000000000000000110 /* ChallengeScanAppTests.swift */; };
 /* End PBXBuildFile section */
 
@@ -56,6 +58,7 @@
 		D10000000000000000000100 /* PathnodChallengeScanApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PathnodChallengeScanApp.swift; sourceTree = "<group>"; };
 		D10000000000000000000101 /* ChallengeScanView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChallengeScanView.swift; sourceTree = "<group>"; };
 		D10000000000000000000102 /* ChallengeBLEController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChallengeBLEController.swift; sourceTree = "<group>"; };
+		D10000000000000000000103 /* ObserverEnrollmentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ObserverEnrollmentView.swift; sourceTree = "<group>"; };
 		D10000000000000000000110 /* ChallengeScanAppTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChallengeScanAppTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -81,6 +84,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				D10000000000000000000062 /* PathnodChallengeCore in Frameworks */,
+				D10000000000000000000066 /* PathnodObserverEnrollment in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -152,6 +156,7 @@
 				D10000000000000000000100 /* PathnodChallengeScanApp.swift */,
 				D10000000000000000000101 /* ChallengeScanView.swift */,
 				D10000000000000000000102 /* ChallengeBLEController.swift */,
+				D10000000000000000000103 /* ObserverEnrollmentView.swift */,
 			);
 			path = ChallengeScan;
 			sourceTree = "<group>";
@@ -221,6 +226,7 @@
 			name = PathnodChallengeScan;
 			packageProductDependencies = (
 				D10000000000000000000061 /* PathnodChallengeCore */,
+				D10000000000000000000065 /* PathnodObserverEnrollment */,
 			);
 			productName = PathnodChallengeScan;
 			productReference = D10000000000000000000020 /* PathnodChallengeScan.app */;
@@ -335,6 +341,7 @@
 				D10000000000000000000200 /* PathnodChallengeScanApp.swift in Sources */,
 				D10000000000000000000201 /* ChallengeScanView.swift in Sources */,
 				D10000000000000000000202 /* ChallengeBLEController.swift in Sources */,
+				D10000000000000000000203 /* ObserverEnrollmentView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -702,6 +709,10 @@
 		D10000000000000000000063 /* PathnodChallengeCore */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = PathnodChallengeCore;
+		};
+		D10000000000000000000065 /* PathnodObserverEnrollment */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = PathnodObserverEnrollment;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};
