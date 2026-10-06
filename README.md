@@ -64,6 +64,9 @@ running system yet.
   collector with eligibility, observer-bound challenges, optional coarse signals
   and a persistent local cache. Physical validation passes; the original <5 s
   collection target remains unmet with the unchanged firmware.
+  [DEV-31](docs/dev31-observation-transcript.md) converts verified captures into
+  canonical Borsh transcripts with credential-bound nullifiers and matching
+  Swift/TypeScript serialization and hashes.
 - `PathnodDensityScan` is a measurement instrument for a two-hour field study,
   not the observer app: it counts BLE advertisers visible while it is open,
   never connects, never runs in the background, never asks for location, and
@@ -125,6 +128,7 @@ artifacts, or build output.
 - [DEV-28 batched observer-root publication](docs/dev28-root-publication.md)
 - [DEV-29 device observation-slot eligibility](docs/dev29-device-eligibility.md)
 - [DEV-30 iPhone observation session](docs/dev30-observation-session.md)
+- [DEV-31 canonical observation transcript](docs/dev31-observation-transcript.md)
 
 ## Contributing
 
