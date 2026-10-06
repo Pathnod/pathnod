@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { randomBytes, randomUUID } from "node:crypto";
+import { randomBytes } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -8,51 +8,16 @@ import { test } from "node:test";
 
 import { buildPoseidon } from "circomlibjs";
 
-import type { AppAttestChallengePurpose, IssuedAppAttestChallenge } from "../src/app-attest-gate.ts";
-import type { VerifiedAppAttestKey } from "../src/app-attest.ts";
 import { createEnrollmentServer } from "../src/enrollment-http.ts";
-import { EnrollmentError, ObserverEnrollmentService, type EnrollmentAttestationGate, type MerklePath } from "../src/observer-enrollment.ts";
+import { EnrollmentError, ObserverEnrollmentService, type MerklePath } from "../src/observer-enrollment.ts";
+
+import { FakeEnrollmentGate as FakeGate } from "./helpers/enrollment-gate.ts";
 
 const commitmentA = `0x${"01".padStart(64, "0")}`;
 const commitmentB = `0x${"02".padStart(64, "0")}`;
 const observerVectorCommitment = "0x2619cd97089689221d77e4e4c3353a4e2488fc2075f74e70bfc7c68a9e077f78";
 const keyA = randomBytes(32).toString("base64");
 const keyB = randomBytes(32).toString("base64");
-
-class FakeGate implements EnrollmentAttestationGate {
-  readonly keys = new Map<string, VerifiedAppAttestKey>();
-  readonly challenges = new Map<string, { purpose: AppAttestChallengePurpose; key?: string }>();
-
-  issueChallenge(purpose: AppAttestChallengePurpose, keyID?: string): IssuedAppAttestChallenge {
-    const id = randomUUID();
-    this.challenges.set(id, { purpose, ...(keyID === undefined ? {} : { key: keyID }) });
-    return { id, bytes: randomBytes(32), expiresAt: Date.now() + 300_000 };
-  }
-
-  acceptAttestation(id: string, keyID: string, value: Uint8Array): VerifiedAppAttestKey {
-    this.consume(id, "attestation", undefined, value);
-    const key: VerifiedAppAttestKey = { keyID, publicKeyPem: "test", appID: "test", environment: "development", counter: 0 };
-    this.keys.set(keyID, key);
-    return key;
-  }
-
-  acceptAssertion(id: string, keyID: string, value: Uint8Array): VerifiedAppAttestKey {
-    this.consume(id, "assertion", keyID, value);
-    const key = this.keys.get(keyID);
-    if (!key) throw Error("Missing key");
-    const updated = { ...key, counter: key.counter + 1 };
-    this.keys.set(keyID, updated);
-    return updated;
-  }
-
-  getKey(keyID: string): VerifiedAppAttestKey | undefined { return this.keys.get(keyID); }
-
-  consume(id: string, purpose: AppAttestChallengePurpose, keyID: string | undefined, value: Uint8Array): void {
-    const challenge = this.challenges.get(id);
-    this.challenges.delete(id);
-    if (challenge?.purpose !== purpose || challenge.key !== keyID || value[0] !== 42) throw Error("Invalid evidence");
-  }
-}
 
 async function verify(path: MerklePath): Promise<void> {
   const poseidon = await buildPoseidon();

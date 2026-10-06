@@ -49,6 +49,9 @@ running system yet.
   documents the iPhone proof and remaining integration limits. DEV-26 adds
   commitment enrollment, a persistent depth-20 Poseidon tree and authenticated
   Merkle-path refresh; see the [enrollment runbook](docs/dev26-observer-enrollment-service.md).
+  [DEV-28](docs/dev28-root-publication.md) adds automatic batched root publication,
+  durable retries and chain-checked publication status, validated on devnet with
+  the recorded iPhone enrollment root.
 - `apps/ios` holds a Swift package for the density study, challenge protocol,
   and `PathnodAppAttest` client. The
   [App Attest spike](apps/ios/AppAttestSpike/README.md) exercises Apple's
@@ -113,6 +116,7 @@ artifacts, or build output.
 - [DEV-19 App Attest server verification](docs/dev19-app-attest-server.md)
 - [DEV-26 observer enrollment service](docs/dev26-observer-enrollment-service.md)
 - [DEV-27 protocol and device registry](docs/dev27-protocol-registry.md)
+- [DEV-28 batched observer-root publication](docs/dev28-root-publication.md)
 
 ## Contributing
 

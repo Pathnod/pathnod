@@ -233,7 +233,7 @@ jobs:
         with:
           node-version-file: .node-version
 
-      - name: Test registry instructions on a local validator
+      - name: Test registry and enrollment publication on a local validator
         shell: bash
         run: |
           set -euo pipefail
@@ -243,6 +243,8 @@ jobs:
           task_wallet="$RUNNER_TEMP/dev27-wallet.json"
           task_program=$(solana-keygen pubkey "$verify_dir/target/deploy/pathnod-keypair.json")
           solana-keygen new --silent --no-bip39-passphrase --outfile "$task_wallet"
+          task_publisher="$RUNNER_TEMP/dev28-publisher.json"
+          solana-keygen new --silent --no-bip39-passphrase --outfile "$task_publisher"
           solana-test-validator --ledger "$RUNNER_TEMP/dev27-ledger" \
             --rpc-port 18899 --faucet-port 18902 --dynamic-port-range 19000-19040 \
             --bind-address 127.0.0.1 --quiet > "$RUNNER_TEMP/dev27-validator.log" 2>&1 &
@@ -258,7 +260,13 @@ jobs:
             --url http://127.0.0.1:18899 --keypair "$task_wallet" --use-rpc
           pnpm --filter @pathnod/solana registry:verify \
             --rpc http://127.0.0.1:18899 --wallet "$task_wallet" --program "$task_program" \
+            --publisher-wallet "$task_publisher" \
             --report "$RUNNER_TEMP/dev27-registry-report.json"
+          pnpm --filter @pathnod/solana build
+          pnpm --filter @pathnod/verifier roots:verify \
+            --rpc http://127.0.0.1:18899 --program "$task_program" --wallet "$task_publisher" \
+            --database "$RUNNER_TEMP/dev28-enrollment.sqlite" --synthetic yes \
+            --report "$RUNNER_TEMP/dev28-root-report.json"
 
       - name: Ensure the checkout remains unchanged
         run: git diff --exit-code
