@@ -54,6 +54,10 @@ running system yet.
   the recorded iPhone enrollment root.
   [DEV-29](docs/dev29-device-eligibility.md) adds public device-slot eligibility
   queries backed by the protocol/device registry and optional epoch counters.
+  [DEV-33](docs/dev33-observation-policy.md) adds the nine-code observation
+  policy, genuine Groth16 and transcript-bound App Attest verification, finalized
+  registry/root/nullifier prechecks and atomic durable replay state. Automated
+  tests pass; physical iPhone submission remains a separate integration check.
 - `apps/ios` holds a Swift package for the density study, challenge protocol,
   and `PathnodAppAttest` client. The
   [App Attest spike](apps/ios/AppAttestSpike/README.md) exercises Apple's
@@ -70,7 +74,8 @@ running system yet.
   [DEV-32](docs/dev32-observation-submission.md) adds the Mopro submission adapter,
   transcript-bound App Attest assertion, protected persistent outbox and an
   explicitly loopback-only development HTTP receipt sink. Receipt is not policy
-  approval, an on-chain observation or payment; complete acceptance is DEV-33.
+  approval, an on-chain observation or payment. DEV-33 adds a distinct validated
+  receipt and preserves the reception/validation distinction in the iOS outbox.
 - `PathnodDensityScan` is a measurement instrument for a two-hour field study,
   not the observer app: it counts BLE advertisers visible while it is open,
   never connects, never runs in the background, never asks for location, and
@@ -133,6 +138,8 @@ artifacts, or build output.
 - [DEV-29 device observation-slot eligibility](docs/dev29-device-eligibility.md)
 - [DEV-30 iPhone observation session](docs/dev30-observation-session.md)
 - [DEV-31 canonical observation transcript](docs/dev31-observation-transcript.md)
+- [DEV-32 proof, assertion and durable submission](docs/dev32-observation-submission.md)
+- [DEV-33 observation verification policy](docs/dev33-observation-policy.md)
 
 ## Contributing
 
