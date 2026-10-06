@@ -67,6 +67,10 @@ running system yet.
   [DEV-31](docs/dev31-observation-transcript.md) converts verified captures into
   canonical Borsh transcripts with credential-bound nullifiers and matching
   Swift/TypeScript serialization and hashes.
+  [DEV-32](docs/dev32-observation-submission.md) adds the Mopro submission adapter,
+  transcript-bound App Attest assertion, protected persistent outbox and an
+  explicitly loopback-only development HTTP receipt sink. Receipt is not policy
+  approval, an on-chain observation or payment; complete acceptance is DEV-33.
 - `PathnodDensityScan` is a measurement instrument for a two-hour field study,
   not the observer app: it counts BLE advertisers visible while it is open,
   never connects, never runs in the background, never asks for location, and
