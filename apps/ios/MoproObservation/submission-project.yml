@@ -1,0 +1,44 @@
+name: PathnodSubmission
+options:
+  bundleIdPrefix: xyz.pathnod
+  deploymentTarget:
+    iOS: "18.0"
+packages:
+  PathnodIOS:
+    path: ..
+targets:
+  PathnodChallengeScan:
+    type: application
+    platform: iOS
+    sources:
+      - path: ../App/ChallengeScan
+        excludes: [ChallengeScan-Info.plist, ChallengeScan.entitlements]
+      - path: MoproiOSBindings/mopro.swift
+      - path: LocalCircuits/observation_final.zkey
+        buildPhase: resources
+    dependencies:
+      - package: PathnodIOS
+        products: [PathnodChallengeCore, PathnodAppAttest, PathnodObserverEnrollment, PathnodObservationCore]
+      - framework: MoproiOSBindings/MoproBindings.xcframework
+        embed: false
+    settings:
+      base:
+        SWIFT_VERSION: "6.0"
+        PRODUCT_BUNDLE_IDENTIFIER: xyz.pathnod.challengescan
+        CURRENT_PROJECT_VERSION: "1"
+        MARKETING_VERSION: "0.1.0"
+        GENERATE_INFOPLIST_FILE: NO
+        CODE_SIGN_STYLE: Automatic
+        INFOPLIST_FILE: ../App/ChallengeScan/ChallengeScan-Info.plist
+        CODE_SIGN_ENTITLEMENTS: ../App/ChallengeScan/ChallengeScan.entitlements
+        TARGETED_DEVICE_FAMILY: "1"
+        SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited) PATHNOD_MOPRO"
+        OTHER_SWIFT_FLAGS: "-Xcc -fmodule-map-file=$(SRCROOT)/MoproiOSBindings/module/module.modulemap"
+      configs:
+        Debug:
+          SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited) DEBUG PATHNOD_MOPRO"
+schemes:
+  PathnodChallengeScan:
+    build:
+      targets:
+        PathnodChallengeScan: all
