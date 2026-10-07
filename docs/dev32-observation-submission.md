@@ -16,7 +16,8 @@ This disclosure is separate from consent to collect a session locally.
 
 The Mopro-enabled build:
 
-1. Drains older pending envelopes before generating another Apple assertion.
+1. Drains older pending envelopes for the selected endpoint before generating
+   another Apple assertion. An unrelated endpoint does not block preparation.
 2. Refreshes the authenticated DEV-26 Merkle path for the current Keychain
    credential and revalidates the capture/credential/path association.
 3. Builds the current circuit witness in memory, using all seven public inputs
@@ -99,8 +100,17 @@ proof/assertion preparation fails before queueing. No timestamp is refreshed to
 make an old capture look fresh; DEV-33 must enforce epoch/freshness policy.
 
 For each endpoint, the first unrejected entry blocks newer entries even while
-its retry deadline is in the future. This FIFO rule survives restarts.
+its retry deadline is in the future. This FIFO rule survives restarts. Changing
+the configured service does not block preparation for an independent service:
+old entries remain saved and can be retried by restoring their original URL.
+The queue counts cover all endpoints, while preparation and retries use only
+the selected endpoint. No old entry is deleted or automatically rebound.
 
+Endpoint isolation assumes independent services. Different URLs backed by the
+same verifier/counter ledger are not independent assertion streams: accepting
+a newer assertion through one alias may invalidate an older assertion queued
+under another. Keep a stable canonical service URL; drain pending observations
+before migrating an existing verifier to a new URL.
 
 Only a `202` JSON receipt with `status: received`, matching `transcript_hash`
 and `policy_validated: false` removes an envelope and records the receipt

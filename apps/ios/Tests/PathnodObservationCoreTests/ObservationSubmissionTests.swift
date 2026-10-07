@@ -170,6 +170,43 @@ final class ObservationSubmissionTests: XCTestCase {
         XCTAssertTrue(try ObservationOutbox(url: file).entries().isEmpty)
     }
 
+    @MainActor func testOldServiceDoesNotBlockPreparationOrReceiveNewServiceEnvelope() async throws {
+        let (capture, credential, path, _) = try input()
+        let envelope = try await ObservationSubmission.prepare(capture: capture, credential: credential, enrollment: path,
+            prover: SubmissionProver(), attester: SubmissionAttester())
+        let dir = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let file = dir.appending(path: "outbox.json")
+        let oldBase = URL(string: "https://old.example")!, newBase = URL(string: "https://new.example")!
+        let oldEndpoint = oldBase.appending(path: "observations"), newEndpoint = newBase.appending(path: "observations")
+        let queue = ObservationOutbox(url: file)
+        try queue.enqueue(envelope, endpoint: oldEndpoint)
+        let now = Date(timeIntervalSince1970: 1_000)
+        let failing = try ObservationHTTPClient(baseURL: oldBase) { _ in throw URLError(.cannotConnectToHost) }
+        do { _ = try await queue.drain(client: failing, now: now); XCTFail("old service should fail") } catch {}
+        let restored = ObservationOutbox(url: file), savedOldEntry = try XCTUnwrap(restored.entries().first)
+        XCTAssertTrue(try restored.hasPending(endpoint: oldEndpoint))
+        XCTAssertFalse(try restored.hasPending(endpoint: newEndpoint))
+        var sent = 0
+        let newClient = try ObservationHTTPClient(baseURL: newBase) { request in
+            XCTAssertEqual(request.url, newEndpoint); sent += 1
+            return (try JSONEncoder().encode(ObservationReceipt(hash: envelope.hashHex())),
+                HTTPURLResponse(url: newEndpoint, statusCode: 202, httpVersion: nil, headerFields: nil)!)
+        }
+        let beforeEnqueue = try await restored.drain(client: newClient, now: now)
+        XCTAssertEqual(beforeEnqueue, 0); XCTAssertEqual(sent, 0)
+        // This is the same endpoint-scoped preparation predicate used by the app.
+        guard try !restored.hasPending(endpoint: newEndpoint) else { return XCTFail("unrelated endpoint blocked preparation") }
+        try restored.enqueue(envelope, endpoint: newEndpoint)
+        XCTAssertTrue(try restored.hasPending(endpoint: newEndpoint))
+        let delivered = try await restored.drain(client: newClient, now: now)
+        XCTAssertEqual(delivered, 1); XCTAssertEqual(sent, 1)
+        XCTAssertEqual(try ObservationOutbox(url: file).entries(), [savedOldEntry])
+        XCTAssertFalse(try restored.hasPending(endpoint: newEndpoint))
+        XCTAssertTrue(try restored.hasPending(endpoint: oldEndpoint))
+        XCTAssertTrue(try restored.wasReceived(hash: envelope.hashHex(), endpoint: newEndpoint))
+        XCTAssertFalse(try restored.wasReceived(hash: envelope.hashHex(), endpoint: oldEndpoint))
+    }
     @MainActor func testInvalidURLsAndCorruptQueueFailClosed() throws {
         for text in ["http://evil.example", "https://u:p@verifier.example", "https://verifier.example?x=1", "https://verifier.example#x"] {
             XCTAssertThrowsError(try ObservationHTTPClient(baseURL: URL(string: text)!, allowLocalHTTP: true))

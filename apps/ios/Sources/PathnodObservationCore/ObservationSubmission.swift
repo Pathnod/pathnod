@@ -234,6 +234,12 @@ private final class ObservationNoRedirects: NSObject, URLSessionTaskDelegate {
 
     public func entries() throws -> [Entry] { try load().pending }
 
+    /// Preparation is blocked only by unrejected assertions for this exact service.
+    /// Never migrate an existing envelope when the configured endpoint changes.
+    public func hasPending(endpoint: URL) throws -> Bool {
+        try entries().contains { $0.endpoint == endpoint && !$0.rejected }
+    }
+
     public func wasReceived(hash: String, endpoint: URL) throws -> Bool {
         try load().received.contains(endpoint.absoluteString + ":" + hash)
     }
