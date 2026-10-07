@@ -3,8 +3,6 @@ import { activeRoots, decodeProtocol, decodeEnrollment, registryAddresses, UPGRA
 import { authorizationInstruction, hex32 } from "./observation-authorization.ts";
 import type { ObservationRelayPayload, ObservationRelayTransport, PreparedObservationTransaction } from "./observation-relay.ts";
 
-/** DEV-35 must supply the actual instruction/account ABI and validate the resulting commitment.
- * Never substitute the caller-key DEV-16 spike for this adapter. */
 export interface ObservationSubmissionAdapter {
   readonly contract: string;
   readonly computeUnitLimit?: number;

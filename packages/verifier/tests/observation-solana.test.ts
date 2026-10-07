@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { createServer } from "node:http";
 import { PublicKey, type AccountInfo } from "@solana/web3.js";
-import { discriminator } from "@pathnod/solana";
+import { DEFAULT_OBSERVATION_KEY_DIGEST, discriminator } from "@pathnod/solana";
 import { eligibilityAccounts } from "./helpers/eligibility-accounts.ts";
 import { SolanaObservationPolicySource } from "../src/observation-solana.ts";
 import { decodeObservationTranscript } from "../src/observation-transcript.ts";
@@ -47,6 +47,27 @@ test("DEV-33 chain source rejects invalid owners, account layouts, configured po
   const f = fixture();
   const unavailable = new SolanaObservationPolicySource({ read: async () => { throw Error("RPC unavailable"); } }, f.program, f.protocol, "test");
   await assert.rejects(unavailable.snapshot(f.t), /RPC unavailable/);
+});
+test("DEV-35 signing source pins the circuit metadata in the same finalized snapshot", async () => {
+  const f = fixture();
+  const metadata = Buffer.concat([
+    discriminator("account", "ObservationVerifierInfo"),
+    Buffer.from(DEFAULT_OBSERVATION_KEY_DIGEST, "hex"), Buffer.from([1, 7]),
+  ]);
+  f.rows.push(f.account(metadata));
+  const source = new SolanaObservationPolicySource({ read: async addresses => {
+    assert.equal(addresses.length, 5);
+    assert.ok(addresses[4]!.equals(PublicKey.findProgramAddressSync([Buffer.from("observation-verifier")], f.program)[0]));
+    return f.rows;
+  } }, f.program, f.protocol, "synthetic-genesis", -90, 3, DEFAULT_OBSERVATION_KEY_DIGEST);
+  assert.equal((await source.snapshot(f.t)).nullifierUsed, false);
+  metadata[8] = metadata[8]! ^ 1;
+  await assert.rejects(source.snapshot(f.t), /circuit key mismatch/);
+  metadata[8] = metadata[8]! ^ 1;
+  f.rows[4]!.owner = PublicKey.default;
+  await assert.rejects(source.snapshot(f.t), /Untrusted/);
+  f.rows[4] = null;
+  await assert.rejects(source.snapshot(f.t), /Untrusted/);
 });
 test("DEV-33 production source pins genesis/program and reads one finalized snapshot", async () => {
   const f = fixture(), calls: { method: string; params: unknown[] }[] = [];

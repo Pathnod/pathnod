@@ -1,8 +1,8 @@
 # DEV-16 — observation submission spike
 
-`submit_observation` verifies the seven-input DEV-13 Groth16 proof with an
+`submit_observation_spike` verifies the seven-input DEV-13 Groth16 proof with an
 immutable DEV-15 test key, then records the nullifier at the program PDA
-`[b"obs", nullifier]`. The PDA stores all seven public inputs, the key-config
+`[b"dev16-obs", nullifier]`. The PDA stores all seven public inputs, the key-config
 address, submitter, and acceptance slot. A second submission of the same
 nullifier fails with `E_NULLIFIER` (custom error 6001), even with another
 payer. A failed proof or changed public input does not create a commitment.
@@ -14,6 +14,11 @@ This is a development-only integration. The key is selected by its creator;
 neither the circuit's transcript nor a registry, active root, epoch, device,
 or attestation is trusted by this instruction. Do not use it for real
 observations or rewards. Those trust checks belong to later protocol work.
+
+DEV-35 reserves `submit_observation` and `[b"obs", nullifier]` for trusted
+observations. The spike was renamed and isolated when DEV-35 was introduced;
+the original DEV-16 deployment used the historical names. Use a fresh deployment
+for the current harness and production ABI.
 
 ## Local test
 

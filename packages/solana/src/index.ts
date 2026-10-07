@@ -203,7 +203,7 @@ export function decodeDeviceEpoch(data: Uint8Array) {
 
 export {OBSERVATION_COMMITMENT_SIZE,DEVICE_EPOCH_SIZE,OBSERVATION_TREE_DEPTH,DEFAULT_OBSERVATION_KEY_DIGEST,
   observationAddresses,initializeObservationVerifier,submitObservation,decodeObservationVerifier,decodeObservationCommitment,
-  observationTreeLeaf,observationTreeNode,appendObservationTree,verificationKeyDigest} from './observation.js';
+  observationTreeLeaf,observationTreeNode,appendObservationTree,verificationKeyDigest} from './observation.ts';
 
 export function activeRoots(state: ReturnType<typeof decodeEnrollment>): Buffer[] {
   const count = Number(state.publications < 4n ? state.publications : 4n);

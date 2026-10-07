@@ -306,6 +306,10 @@ jobs:
             --rpc http://127.0.0.1:18899 --registry-report "$RUNNER_TEMP/dev27-registry-report.json" \
             --database "$RUNNER_TEMP/dev29-enrollment.sqlite" \
             --report "$RUNNER_TEMP/dev29-eligibility-report.json"
+          pnpm --filter @pathnod/verifier observations:verify \
+            --rpc http://127.0.0.1:18899 --program "$task_program" --wallet "$task_wallet" \
+            --publisher-wallet "$task_publisher" --database "$RUNNER_TEMP/dev35-policy.sqlite" \
+            --report "$RUNNER_TEMP/dev35-submission-report.json"
 
       - name: Ensure the checkout remains unchanged
         run: git diff --exit-code

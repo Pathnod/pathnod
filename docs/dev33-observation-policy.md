@@ -3,7 +3,8 @@
 DEV-33 adds a fail-closed verifier for Spec §7.1. It validates observations;
 On its own it does **not** sign `verifier_sig`, relay a transaction, or pay rewards.
 The optional [DEV-34 signing/outbox extension](dev34-verifier-signature-relayer.md)
-adds fresh-acceptance authorization; production onchain submission still requires DEV-35.
+adds fresh-acceptance authorization. [DEV-35](dev35-submit-observation.md) implements
+the trusted onchain submission instruction and concrete relay worker.
 It currently supports registered Ed25519 devices and enrolled iOS App Attest
 observers (class 1). Other curves/classes are explicitly rejected, not silently
 accepted. The existing DEV-32 receipt sink remains a distinct loopback-only

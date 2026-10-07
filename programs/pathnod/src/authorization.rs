@@ -1,4 +1,4 @@
-//! DEV-34 signing ABI only. DEV-35 must enforce this with the Ed25519 precompile.
+//! Verifier authorization digests shared with the Ed25519 consumer.
 use anchor_lang::prelude::*;
 use solana_sha256_hasher::hashv;
 
@@ -90,6 +90,44 @@ mod tests {
         );
         assert!(
             observation_authorization_digest(&[0x11; 32], &nullifier, &pseudonym, 1, 0).is_err()
+        );
+    }
+
+    #[test]
+    fn shared_evidence_signature_digest_and_zero_compatibility() {
+        let fixture: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../fixtures/observations/verifier-authorization-v1.json"
+        ))
+        .unwrap();
+        let mut nullifier = [0; 32];
+        nullifier[31] = 0x22;
+        let mut pseudonym = [0; 32];
+        pseudonym[31] = 0x33;
+        let digest = observation_authorization_with_evidence_digest(
+            &[0x11; 32],
+            &[0x44; 32],
+            &nullifier,
+            &pseudonym,
+            1,
+            0x01020304,
+        )
+        .unwrap();
+        let encoded = digest
+            .iter()
+            .map(|v| format!("{v:02x}"))
+            .collect::<String>();
+        assert_eq!(encoded, fixture["digest"].as_str().unwrap());
+        assert_eq!(
+            observation_authorization_with_evidence_digest(
+                &[0x11; 32],
+                &[0; 32],
+                &nullifier,
+                &pseudonym,
+                1,
+                1
+            )
+            .unwrap(),
+            observation_authorization_digest(&[0x11; 32], &nullifier, &pseudonym, 1, 1).unwrap()
         );
     }
 }

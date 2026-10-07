@@ -165,3 +165,21 @@ test("DEV-34: reconciliation outages never rebuild or resend; corrupted signatur
     assert.equal(worker.status(vector.transcriptHash)?.status, "failed"); assert.equal(f.transport.sent.length, 1);
   } finally { await worker.close(); f.close(); }
 });
+
+test('DEV-35: an externally finalized matching commitment resolves queued and failed-signature jobs',async()=>{
+  for(const submitted of [false,true]) {
+    const f=fixture();let now=1000;
+    let exists=false;
+    const transport:ObservationRelayTransport={target:f.transport.target,eligible:f.transport.eligible.bind(f.transport),
+      prepare:f.transport.prepare.bind(f.transport),send:f.transport.send.bind(f.transport),inspect:f.transport.inspect.bind(f.transport),expired:f.transport.expired.bind(f.transport),
+      confirmExisting:async()=>exists};
+    const worker=new ObservationRelayer(f.path,'test-only-policy',vector.verifier,transport,()=>now);
+    try {
+      if(submitted){await worker.tick();f.transport.state='failed';}
+      exists=true;now+=5000;await worker.tick();
+      assert.equal(worker.status(vector.transcriptHash)?.status,'confirmed');assert.equal(worker.status(vector.transcriptHash)?.on_chain,true);
+      assert.equal(worker.status(vector.transcriptHash)?.signature,null);
+      assert.equal(f.transport.sent.length,submitted?1:0);
+    }finally{await worker.close();f.close();}
+  }
+});

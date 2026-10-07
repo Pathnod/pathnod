@@ -95,7 +95,7 @@ struct ObservationSessionView: View {
                     Button("Copy session summary") { UIPasteboard.general.string = controller.observationReport }
                 }.accessibilityIdentifier("completedObservation")
                 Section("Send to the verifier") {
-                    Text("The verifier receives the signed device replies, timings, signal samples, optional approximate location, scoped pseudonym, nullifier, membership proof and your opaque App Attest key ID/assertion. Your observer secret and precise coordinates are not sent. Receipt does not mean policy approval, on-chain acceptance or payment.")
+                    Text("The verifier receives the signed device replies, timings, signal samples, optional approximate location, scoped pseudonym, nullifier, membership proof and your opaque App Attest key ID/assertion. Your observer secret and precise coordinates are not sent. Receipts report policy validation separately from on-chain confirmation and payment.")
                         .font(.footnote)
                     Toggle("I agree to send this observation", isOn: $submissionReviewed)
                         .onChange(of: submissionReviewed) { if !$0 { submission.cancelPreparation() } }
@@ -235,7 +235,7 @@ private final class ObservationSubmissionModel: ObservableObject {
             let hash = try transcript.transcriptHash().hexString
             if try queue.wasReceived(hash: hash, endpoint: http.endpoint) {
                 status = try queue.wasValidated(hash: hash, endpoint: http.endpoint)
-                    ? "This observation was already policy-validated. Not submitted on-chain or paid."
+                    ? "This observation was already policy-validated. This receipt does not confirm on-chain submission or payment."
                     : "This observation was already received by the development sink. Not policy-validated or paid."
                 return
             }
@@ -248,7 +248,7 @@ private final class ObservationSubmissionModel: ObservableObject {
             let received = try await queue.drain(client: http)
             if received > 0 {
                 status = try queue.wasValidated(hash: hash, endpoint: http.endpoint)
-                    ? "Policy-validated by the verifier. Not submitted on-chain or paid."
+                    ? "Policy-validated by the verifier. This receipt does not confirm on-chain submission or payment."
                     : "Received by development verifier. Not policy-validated or paid."
             } else { status = "Queued; waiting for retry." }
             #endif

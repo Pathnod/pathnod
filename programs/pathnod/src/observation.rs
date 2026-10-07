@@ -279,7 +279,9 @@ pub fn handle_submit(ctx: Context<SubmitObservation>, args: SubmitObservationArg
 #[cfg(test)]
 mod tests {
     use super::*;
+    use anchor_lang::solana_program::instruction::BorrowedInstruction;
     use serde_json::Value;
+    use solana_instructions_sysvar::{construct_instructions_data, store_current_index_checked};
     fn bytes<const N: usize>(value: &str) -> [u8; N] {
         value
             .trim_start_matches("0x")
@@ -289,6 +291,78 @@ mod tests {
             .collect::<Vec<_>>()
             .try_into()
             .unwrap()
+    }
+    #[test]
+    fn verifier_introspection_binds_message_key_layout_and_top_level_consumer() {
+        let verifier = Pubkey::new_unique();
+        let digest = [17; 32];
+        let mut ed = vec![0; 144];
+        ed[..16].copy_from_slice(&[
+            1, 0, 48, 0, 255, 255, 16, 0, 255, 255, 112, 0, 32, 0, 255, 255,
+        ]);
+        ed[16..48].copy_from_slice(verifier.as_ref());
+        ed[112..].copy_from_slice(&digest);
+        let run = |ed: &[u8], ed_program: &Pubkey, consumer: &Pubkey, sysvar: &Pubkey| {
+            let instructions = [
+                BorrowedInstruction {
+                    program_id: ed_program,
+                    accounts: vec![],
+                    data: ed,
+                },
+                BorrowedInstruction {
+                    program_id: consumer,
+                    accounts: vec![],
+                    data: crate::instruction::SubmitObservation::DISCRIMINATOR,
+                },
+            ];
+            let mut data = construct_instructions_data(&instructions);
+            let mut lamports = 0;
+            let owner = Pubkey::default();
+            store_current_index_checked(&mut data, 1).unwrap();
+            let account = AccountInfo::new(
+                sysvar,
+                false,
+                false,
+                &mut lamports,
+                &mut data,
+                &owner,
+                false,
+            );
+            check_authorization(&account, &verifier, &digest)
+        };
+        assert!(run(
+            &ed,
+            &ED25519_PROGRAM,
+            &crate::ID,
+            &solana_instructions_sysvar::ID
+        )
+        .is_ok());
+        for offset in [0, 2, 4, 6, 8, 10, 12, 14, 16, 112] {
+            let mut bad = ed.clone();
+            bad[offset] ^= 1;
+            assert!(run(
+                &bad,
+                &ED25519_PROGRAM,
+                &crate::ID,
+                &solana_instructions_sysvar::ID
+            )
+            .is_err());
+        }
+        assert!(run(
+            &ed,
+            &Pubkey::default(),
+            &crate::ID,
+            &solana_instructions_sysvar::ID
+        )
+        .is_err());
+        assert!(run(
+            &ed,
+            &ED25519_PROGRAM,
+            &Pubkey::default(),
+            &solana_instructions_sysvar::ID
+        )
+        .is_err());
+        assert!(run(&ed, &ED25519_PROGRAM, &crate::ID, &Pubkey::default()).is_err());
     }
     #[test]
     fn shared_ids_use_the_native_poseidon_parameters() {
