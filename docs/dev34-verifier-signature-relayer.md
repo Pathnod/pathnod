@@ -81,7 +81,13 @@ The worker persists exact signed bytes/signature/blockhash expiry **before send*
 Lost responses and restarts inspect transaction history first. Missing transactions
 are resent with identical bytes while valid. Replacement requires observed expiry
 and a second missing-history check; pending/uncertain RPC outcomes never trigger
-replacement. There are at most eight generations, with retry backoff capped at
+replacement. If eligibility changes after a broadcast, stop sending but keep
+the submitted job available for reconciliation. A changed verifier/root/policy or
+an existing nullifier does not establish the outcome of an unexpired transaction.
+Failure due to changed eligibility is terminal only for an unsent job or after
+observed expiry and the second missing-history check. A later confirmation,
+including after worker restart, still wins without resend or replacement.
+There are at most eight generations, with retry backoff capped at
 one hour for failures. Finalized transaction errors are terminal. Success requires
 both finalized execution and adapter confirmation of the actual commitment.
 `on_chain` is true only for confirmed rows; `paid` stays false. Changing a pinned

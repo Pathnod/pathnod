@@ -45,6 +45,7 @@ class Transport implements ObservationRelayTransport {
   state: "missing" | "pending" | "confirmed" | "failed" = "missing";
   allowed = true; isExpired = false; ambiguous = false; prepareCalls = 0; sent: string[] = [];
   inspectFailure = false;
+  inspectStates: Array<"missing" | "pending" | "confirmed" | "failed"> = [];
   async eligible() { return this.allowed; }
   async prepare(): Promise<PreparedObservationTransaction> {
     this.prepareCalls++;
@@ -54,7 +55,7 @@ class Transport implements ObservationRelayTransport {
     this.sent.push(tx.wire);
     if (this.ambiguous) { this.state = "confirmed"; throw Error("Lost reply after execution"); }
   }
-  async inspect() { if (this.inspectFailure) throw Error("RPC timeout"); return this.state; }
+  async inspect() { if (this.inspectFailure) throw Error("RPC timeout"); return this.inspectStates.shift() ?? this.state; }
   async expired() { return this.isExpired; }
 }
 function fixture() {
@@ -110,6 +111,45 @@ test("DEV-34: changed policy/root stops broadcasts; altered authorization and ta
     assert.equal(worker.status(vector.transcriptHash)?.status, "failed"); assert.equal(f.transport.sent.length, 0);
     assert.throws(() => new ObservationRelayer(f.path, "another-policy", vector.verifier, f.transport), /mismatch/);
     await worker.close(); f.transport.target = "another-cluster"; assert.throws(f.open, /mismatch/);
+  } finally { await worker.close(); f.close(); }
+});
+test("DEV-34: changed eligibility cannot abandon an unexpired broadcast; restart reconciles without resend", async () => {
+  const f = fixture(); let worker = f.open();
+  try {
+    await worker.tick();
+    const original = f.db.prepare("SELECT wire, signature, last_valid_height FROM observation_relay_jobs").get();
+    f.transport.allowed = false; f.advance(); await worker.tick();
+    assert.equal(worker.status(vector.transcriptHash)?.status, "submitted");
+    assert.equal(worker.status(vector.transcriptHash)?.on_chain, false);
+    assert.deepEqual(f.db.prepare("SELECT wire, signature, last_valid_height FROM observation_relay_jobs").get(), original);
+    assert.equal(f.transport.sent.length, 1); assert.equal(f.transport.prepareCalls, 1);
+    await worker.close(); worker = f.open();
+    f.transport.state = "confirmed"; f.advance(); await worker.tick();
+    assert.equal(worker.status(vector.transcriptHash)?.status, "confirmed");
+    assert.equal(worker.status(vector.transcriptHash)?.on_chain, true);
+    assert.equal(f.transport.sent.length, 1); assert.equal(f.transport.prepareCalls, 1);
+  } finally { await worker.close(); f.close(); }
+});
+test("DEV-34: changed eligibility becomes terminal only after expiry and the second missing-history check", async () => {
+  const f = fixture(), worker = f.open();
+  try {
+    await worker.tick(); f.transport.allowed = false; f.transport.isExpired = true;
+    f.transport.inspectStates = ["missing", "missing"]; f.advance(); await worker.tick();
+    assert.equal(f.transport.inspectStates.length, 0);
+    assert.equal(worker.status(vector.transcriptHash)?.status, "failed");
+    assert.equal(worker.status(vector.transcriptHash)?.last_error, "policy_or_chain_changed");
+    assert.equal(f.transport.sent.length, 1); assert.equal(f.transport.prepareCalls, 1);
+  } finally { await worker.close(); f.close(); }
+});
+test("DEV-34: confirmation in the second expiry check wins over changed eligibility", async () => {
+  const f = fixture(), worker = f.open();
+  try {
+    await worker.tick(); f.transport.allowed = false; f.transport.isExpired = true;
+    f.transport.inspectStates = ["missing", "confirmed"]; f.advance(); await worker.tick();
+    assert.equal(f.transport.inspectStates.length, 0);
+    assert.equal(worker.status(vector.transcriptHash)?.status, "confirmed");
+    assert.equal(worker.status(vector.transcriptHash)?.on_chain, true);
+    assert.equal(f.transport.sent.length, 1); assert.equal(f.transport.prepareCalls, 1);
   } finally { await worker.close(); f.close(); }
 });
 test("DEV-34: reconciliation outages never rebuild or resend; corrupted signatures cannot broadcast", async () => {

@@ -137,7 +137,14 @@ export class ObservationRelayer {
         transaction = undefined;
       }
     }
-    if (!await this.#transport.eligible(payload)) { this.#fail(job, "policy_or_chain_changed"); return; }
+    if (!await this.#transport.eligible(payload)) {
+      // A changed account snapshot blocks another broadcast, but does not resolve
+      // signed bytes already sent. Keep reconciling while their blockhash is valid.
+      // transaction is cleared only after expiry and a second missing-history check.
+      if (transaction) this.#retry(job);
+      else this.#fail(job, "policy_or_chain_changed");
+      return;
+    }
     if (!transaction) {
       if (job.generations >= 8) { this.#fail(job, "replacement_limit"); return; }
       transaction = await this.#transport.prepare(payload);
