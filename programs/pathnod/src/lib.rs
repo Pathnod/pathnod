@@ -14,12 +14,27 @@ pub use authorization::observation_authorization_digest;
 mod observation;
 mod trusted_vk;
 pub use observation::*;
+mod payments;
+pub use payments::*;
 
 declare_id!("5V9pXQN5dQkRBSTsaezBg6qLRC3mbLj21Ny3j7xtuHTd");
 
 #[program]
 pub mod pathnod {
     use super::*;
+
+    pub fn initialize_payments(ctx: Context<InitializePayments>) -> Result<()> {
+        payments::initialize(ctx)
+    }
+    pub fn update_fees(ctx: Context<UpdateFees>, fee_bps: u16) -> Result<()> {
+        payments::update_fees(ctx, fee_bps)
+    }
+    pub fn update_policy(ctx: Context<UpdatePolicy>, args: UpdatePolicyArgs) -> Result<()> {
+        payments::update_policy(ctx, args)
+    }
+    pub fn claim_payout(ctx: Context<ClaimPayout>, args: ClaimPayoutArgs) -> Result<()> {
+        payments::claim(ctx, args)
+    }
 
     pub fn initialize_enrollment_authority(
         ctx: Context<InitializeEnrollmentAuthority>,
@@ -222,6 +237,10 @@ pub enum PathnodError {
     ObserverCountOverflow,
     #[msg("Observation epoch is outside the protocol freshness window")]
     InvalidObservationEpoch,
+    #[msg("Payout balance, binding, expiry or nonce is invalid")]
+    InvalidPayout,
+    #[msg("Payment arithmetic overflow")]
+    PaymentOverflow,
 }
 
 fn verify_proof(
