@@ -9,6 +9,8 @@ use groth16_solana::groth16::{Groth16Verifier, Groth16Verifyingkey};
 
 mod registry;
 pub use registry::*;
+mod authorization;
+pub use authorization::observation_authorization_digest;
 
 declare_id!("5V9pXQN5dQkRBSTsaezBg6qLRC3mbLj21Ny3j7xtuHTd");
 

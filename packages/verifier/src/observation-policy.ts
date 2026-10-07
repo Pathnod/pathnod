@@ -3,6 +3,8 @@ import { DatabaseSync } from "node:sqlite";
 import { AppAttestVerifier, type AppAttestPolicy, type VerifiedAppAttestKey } from "./app-attest.ts";
 import { parseObservationEnvelope, type ObservationEnvelope } from "./observation-inbox.ts";
 import { decodeObservationTranscript, type ObservationTranscript, type TranscriptChallenge } from "./observation-transcript.ts";
+import { ObservationSigner, relayProofBytes } from "./observation-authorization.ts";
+import { initializeObservationRelay, queueValidatedObservation, type ObservationRelayPayload } from "./observation-relay.ts";
 
 export type ObservationPolicyCode = "E_DEVICE_UNKNOWN" | "E_DEV_SIG" | "E_DEV_COUNTER" | "E_RTT" |
   "E_EPOCH" | "E_ASSERTION" | "E_ZK" | "E_NULLIFIER" | "E_RSSI";
@@ -22,6 +24,8 @@ export interface ObservationPolicySource {
     minimumRSSI: number;
     roots: string[];
     nullifierUsed: boolean;
+    verifier?: string;
+    policyVersion?: number;
   }>;
 }
 export interface ObservationProofVerifier {
@@ -50,14 +54,20 @@ export class ObservationPolicyService {
   readonly #proof: ObservationProofVerifier;
   readonly #clock: () => number;
   readonly #capacity: number;
+  readonly #relay: { signer: ObservationSigner; capacity: number } | undefined;
   constructor(databasePath: string, policy: AppAttestPolicy, source: ObservationPolicySource,
-    proof: ObservationProofVerifier, options: { clock?: () => number; capacity?: number } = {}) {
+    proof: ObservationProofVerifier, options: { clock?: () => number; capacity?: number;
+      relay?: { signer: ObservationSigner; capacity?: number } } = {}) {
     this.#capacity = options.capacity ?? 100_000;
     if (!source.target || !Number.isInteger(this.#capacity) || this.#capacity < 1 || this.#capacity > 1_000_000) {
       throw Error("Invalid observation policy configuration");
     }
     this.#source = source; this.#proof = proof; this.#clock = options.clock ?? Date.now;
     this.#attest = new AppAttestVerifier(policy); this.#db = new DatabaseSync(databasePath);
+    this.#relay = options.relay ? { signer: options.relay.signer, capacity: options.relay.capacity ?? this.#capacity } : undefined;
+    if (this.#relay && (!Number.isInteger(this.#relay.capacity) || this.#relay.capacity < 1 || this.#relay.capacity > 1_000_000)) {
+      this.#db.close(); throw Error("Invalid relay capacity");
+    }
     this.#db.exec(`
       PRAGMA journal_mode=WAL;
       PRAGMA busy_timeout=5000;
@@ -76,8 +86,19 @@ export class ObservationPolicyService {
       this.#db.prepare("SELECT key_id FROM observer_enrollments LIMIT 1").get();
       this.#db.prepare("SELECT key_id FROM app_attest_keys LIMIT 1").get();
     } catch (error) { this.#db.close(); throw error; }
+    if (this.#relay) {
+      try { initializeObservationRelay(this.#db, source.target, this.#relay.signer.publicKey); }
+      catch (error) { this.#db.close(); throw error; }
+    }
   }
   close(): void { this.#db.close(); }
+  relayStatus(hash: string) {
+    if (!/^[a-f0-9]{64}$/.test(hash)) throw Error("Invalid transcript hash");
+    if (!this.#relay) return undefined;
+    const row = this.#db.prepare("SELECT status, signature, last_error FROM observation_relay_jobs WHERE transcript_hash=?").get(hash);
+    return row ? { status: row.status, transaction_signature: row.signature, error: row.last_error,
+      on_chain: row.status === "confirmed", paid: false } : undefined;
+  }
   revoke(keyID: string): void {
     this.#db.prepare("INSERT OR IGNORE INTO observer_revocations_v0 VALUES (?, ?)").run(keyID, this.#clock());
   }
@@ -158,6 +179,19 @@ export class ObservationPolicyService {
     if (snapshot.nullifierUsed || this.#db.prepare("SELECT 1 FROM observation_validations_v0 WHERE nullifier=?").get(nullifier)) reject("E_NULLIFIER");
     if (t.local.rssiSamples.length < 5 || median(t.local.rssiSamples) < snapshot.minimumRSSI) reject("E_RSSI");
     const now = this.#checkTime(t, snapshot.epochSeconds);
+    let relayPayload: ObservationRelayPayload | undefined;
+    if (this.#relay) {
+      if (snapshot.verifier !== this.#relay.signer.publicKey || !Number.isInteger(snapshot.policyVersion) ||
+          snapshot.policyVersion! < 1 || snapshot.policyVersion! > 0xffff_ffff) {
+        throw new ObservationPolicyError("observation_dependency_unavailable");
+      }
+      const authorization = { transcriptHash: hash, nullifier, pseudonym: Buffer.from(t.pseudonym).toString("hex"),
+        observerClass: t.observerClass, policyVersion: snapshot.policyVersion! };
+      relayPayload = { ...authorization, protocolID: Buffer.from(t.protocolID).toString("hex"), deviceID: device,
+        evidenceHash: Buffer.from(t.evidenceHash).toString("hex"), epoch: t.epoch,
+        proofBytes: relayProofBytes(envelope.zk.proof, envelope.zk.public).toString("hex"),
+        verifier: this.#relay.signer.publicKey, verifierSignature: "" };
+    }
     // No await inside the transaction. CAS also observes concurrent enrollment/tree assertions.
     this.#db.exec("BEGIN IMMEDIATE");
     try {
@@ -170,12 +204,19 @@ export class ObservationPolicyService {
       if (Number(this.#db.prepare("SELECT COUNT(*) AS n FROM observation_validations_v0").get()!.n) >= this.#capacity) {
         throw new ObservationPolicyError("observation_capacity");
       }
+      if (this.#relay && Number(this.#db.prepare("SELECT COUNT(*) AS n FROM observation_relay_jobs").get()!.n) >= this.#relay.capacity) {
+        throw new ObservationPolicyError("observation_capacity");
+      }
       const changed = this.#db.prepare("UPDATE app_attest_keys SET counter=?, bundle_version=? WHERE key_id=? AND counter=?")
         .run(asserted.counter, asserted.bundleVersion ?? null, envelope.key_id, key.counter);
       if (changed.changes !== 1) reject("E_ASSERTION");
       if (counterEnabled) this.#db.prepare(`INSERT INTO observation_device_counters_v0 VALUES (?, ?)
         ON CONFLICT(device_id) DO UPDATE SET counter=excluded.counter`).run(device, t.challenges[2]!.deviceCounter);
       this.#db.prepare("INSERT INTO observation_validations_v0 VALUES (?, ?, ?, ?)").run(hash, digest, nullifier, now);
+      if (relayPayload) {
+        relayPayload.verifierSignature = this.#relay!.signer.sign(relayPayload);
+        queueValidatedObservation(this.#db, relayPayload, this.#relay!.capacity);
+      }
       this.#db.exec("COMMIT");
     } catch (error) { if (this.#db.isTransaction) this.#db.exec("ROLLBACK"); throw error; }
     return { status: "validated", transcript_hash: hash, policy_validated: true };

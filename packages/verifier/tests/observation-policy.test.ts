@@ -14,6 +14,8 @@ import { PinnedGroth16Verifier } from "../src/observation-groth16.ts";
 import { createEnrollmentServer } from "../src/enrollment-http.ts";
 import { PublicKey } from "@solana/web3.js";
 import { SolanaObservationPolicySource } from "../src/observation-solana.ts";
+import { ObservationSigner, verifyAuthorization } from "../src/observation-authorization.ts";
+import type { ObservationRelayPayload } from "../src/observation-relay.ts";
 
 const vector = JSON.parse(readFileSync(new URL("../../../fixtures/observations/transcript-v0.json", import.meta.url), "utf8")).vectors[0];
 const policy = { appID: "U5MCCC24G5.xyz.pathnod.appattestspike", environment: "development", allowedValidationCategories: [3], allowedBundleVersions: [] } as const;
@@ -41,6 +43,7 @@ async function fixture(capacity = 100) {
   const t = decodeObservationTranscript(Buffer.from(vector.bytes.slice(2), "hex"));
   let now = Number(t.observationTimeMilliseconds), proofValid = true, unavailable = false, proofCalls = 0;
   const snapshot = { device: { key: t.publicKey, curve: 1, capabilities: 2 }, epochSeconds: 60,
+    verifier: "", policyVersion: 1,
     minimumRSSI: -90, roots: [BigInt(vector.enrollment.root).toString()], nullifierUsed: false };
   const source: ObservationPolicySource = { target: "test-only/dev33", snapshot: async () => {
     if (unavailable) throw Error("test RPC unavailable"); return snapshot;
@@ -65,12 +68,63 @@ async function fixture(capacity = 100) {
     get service() { return service; }, get proofCalls() { return proofCalls; },
     setNow: (n: number) => { now = n; }, setProof: (v: boolean) => { proofValid = v; }, setUnavailable: () => { unavailable = true; },
     restart: () => { service.close(); service = new ObservationPolicyService(path, policy, source, proof, { clock: () => now, capacity }); },
+    enableRelay: (signer: ObservationSigner, relayCapacity = capacity) => {
+      service.close(); snapshot.verifier = signer.publicKey;
+      service = new ObservationPolicyService(path, policy, source, proof,
+        { clock: () => now, capacity, relay: { signer, capacity: relayCapacity } });
+    },
     close: () => { service.close(); db.close(); enrollment.close(); gate.close(); rmSync(dir, { recursive: true, force: true }); } };
 }
 async function code(expected: string, action: Promise<unknown>) {
   await assert.rejects(action, (error: unknown) => error instanceof ObservationPolicyError && error.code === expected);
 }
 
+test("DEV-34: only successful fresh validation atomically signs and queues one private-data-free job", async () => {
+  const f = await fixture(), signer = new ObservationSigner(Buffer.alloc(32, 7));
+  try {
+    f.enableRelay(signer);
+    await code("E_ASSERTION", f.service.receive({ ...f.envelope(), assertion: "Kg==" }));
+    assert.equal(f.db.prepare("SELECT COUNT(*) AS n FROM observation_relay_jobs").get()!.n, 0);
+    const envelope = f.envelope();
+    const receipts = await Promise.all([f.service.receive(envelope), f.service.receive(envelope)]);
+    assert.deepEqual(receipts[0], receipts[1]);
+    const rows = f.db.prepare("SELECT * FROM observation_relay_jobs").all(); assert.equal(rows.length, 1);
+    const payload = JSON.parse(String(rows[0]!.payload)) as ObservationRelayPayload;
+    assert.ok(verifyAuthorization(payload, signer.publicKey, payload.verifierSignature));
+    assert.equal(payload.transcriptHash, receipts[0]!.transcript_hash);
+    assert.equal(payload.proofBytes.length, 960);
+    for (const forbidden of ["assertion", "key_id", "transcript", "s_obs", "geohash"]) {
+      assert.ok(!Object.hasOwn(payload, forbidden));
+    }
+    assert.ok(!String(rows[0]!.payload).includes(f.keyID));
+    assert.equal(f.gate.getKey(f.keyID)!.counter, 1);
+    f.enableRelay(signer); await f.service.receive(envelope);
+    assert.equal(f.db.prepare("SELECT COUNT(*) AS n FROM observation_relay_jobs").get()!.n, 1);
+  } finally { f.close(); }
+});
+test("DEV-34: historical receipts cannot enqueue; key mismatch and capacity never consume counters", async () => {
+  const f = await fixture(), signer = new ObservationSigner(Buffer.alloc(32, 7));
+  try {
+    const envelope = f.envelope(); await f.service.receive(envelope); f.enableRelay(signer);
+    await f.service.receive(envelope);
+    assert.equal(f.db.prepare("SELECT COUNT(*) AS n FROM observation_relay_jobs").get()!.n, 0);
+    assert.equal(f.gate.getKey(f.keyID)!.counter, 1);
+  } finally { f.close(); }
+  const fresh = await fixture();
+  try {
+    fresh.enableRelay(signer, 1);
+    fresh.snapshot.verifier = new ObservationSigner(Buffer.alloc(32, 8)).publicKey;
+    await code("observation_dependency_unavailable", fresh.service.receive(fresh.envelope()));
+    assert.equal(fresh.gate.getKey(fresh.keyID)!.counter, 0);
+    fresh.snapshot.verifier = signer.publicKey;
+    fresh.db.prepare("INSERT INTO observation_relay_jobs (nullifier, transcript_hash, payload, status) VALUES (?, ?, '{}', 'failed')")
+      .run("0".repeat(64), "0".repeat(64));
+    await code("observation_capacity", fresh.service.receive(fresh.envelope()));
+    assert.equal(fresh.gate.getKey(fresh.keyID)!.counter, 0);
+    assert.equal(fresh.db.prepare("SELECT COUNT(*) AS n FROM observation_device_counters_v0").get()!.n, 0);
+    assert.equal(fresh.db.prepare("SELECT COUNT(*) AS n FROM observation_validations_v0").get()!.n, 0);
+  } finally { fresh.close(); }
+});
 test("DEV-33: all nine rejection codes, genuine Ed25519/P256 signatures, no mutation on failure", async () => {
   const cases: [string, (f: Awaited<ReturnType<typeof fixture>>, e: ObservationEnvelope) => void][] = [
     ["E_DEVICE_UNKNOWN", f => { f.snapshot.device.key = Buffer.alloc(32); }],
@@ -86,11 +140,29 @@ test("DEV-33: all nine rejection codes, genuine Ed25519/P256 signatures, no muta
   for (const [expected, alter] of cases) {
     const f = await fixture();
     try {
+      f.enableRelay(new ObservationSigner(Buffer.alloc(32, 7)));
       const e = f.envelope(); alter(f, e); await code(expected, f.service.receive(e));
       assert.equal(f.gate.getKey(f.keyID)!.counter, 0);
       assert.equal(f.db.prepare("SELECT COUNT(*) AS n FROM observation_validations_v0").get()!.n, 0);
+      assert.equal(f.db.prepare("SELECT COUNT(*) AS n FROM observation_relay_jobs").get()!.n, 0);
     } finally { f.close(); }
   }
+});
+test("DEV-34: failed durable handoff rolls back counters and receipt; exact retry succeeds", async () => {
+  const f = await fixture();
+  try {
+    f.enableRelay(new ObservationSigner(Buffer.alloc(32, 7)));
+    f.db.exec("CREATE TRIGGER reject_relay BEFORE INSERT ON observation_relay_jobs BEGIN SELECT RAISE(ABORT, 'injected storage failure'); END");
+    const envelope = f.envelope();
+    await assert.rejects(f.service.receive(envelope), /injected storage failure/);
+    assert.equal(f.gate.getKey(f.keyID)!.counter, 0);
+    assert.equal(f.db.prepare("SELECT COUNT(*) AS n FROM observation_device_counters_v0").get()!.n, 0);
+    assert.equal(f.db.prepare("SELECT COUNT(*) AS n FROM observation_validations_v0").get()!.n, 0);
+    assert.equal(f.db.prepare("SELECT COUNT(*) AS n FROM observation_relay_jobs").get()!.n, 0);
+    f.db.exec("DROP TRIGGER reject_relay"); await f.service.receive(envelope);
+    assert.equal(f.gate.getKey(f.keyID)!.counter, 1);
+    assert.equal(f.db.prepare("SELECT COUNT(*) AS n FROM observation_relay_jobs").get()!.n, 1);
+  } finally { f.close(); }
 });
 test("DEV-33: accepted boundaries, durable idempotence and simultaneous identical retries", async () => {
   const f = await fixture();

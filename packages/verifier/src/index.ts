@@ -19,6 +19,13 @@ export type { ObservationPolicyCode, ObservationPolicySource, ObservationProofVe
 export { SolanaObservationPolicySource } from "./observation-solana.ts";
 export type { ObservationAccountReader } from "./observation-solana.ts";
 export { PinnedGroth16Verifier } from "./observation-groth16.ts";
+export { ObservationSigner, loadObservationSigner, authorizationPreimage, authorizationDigest,
+  verifyAuthorization, authorizationInstruction, relayProofBytes } from "./observation-authorization.ts";
+export type { ObservationAuthorization } from "./observation-authorization.ts";
+export { ObservationRelayer } from "./observation-relay.ts";
+export type { ObservationRelayPayload, ObservationRelayTransport, PreparedObservationTransaction } from "./observation-relay.ts";
+export { SolanaObservationRelayTransport } from "./solana-observation-relay.ts";
+export type { ObservationSubmissionAdapter } from "./solana-observation-relay.ts";
 export type { AppAttestChallengePurpose, IssuedAppAttestChallenge, IssuedAppAttestTrial } from "./app-attest-gate.ts";
 
 export { AppAttestVerifier, AppAttestVerificationError } from "./app-attest.ts";
