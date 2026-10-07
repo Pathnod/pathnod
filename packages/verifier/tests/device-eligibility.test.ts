@@ -109,6 +109,7 @@ test("HTTP exposes eligibility without enrollment, rejects ambiguous queries and
     const route = `http://127.0.0.1:${address.port}/devices/${hex(f.device)}/slots`;
     const response = await fetch(route + "?epoch=42");
     assert.equal(response.status, 200); assert.equal(response.headers.get("cache-control"), "no-store");
+    assert.equal(response.headers.get("x-pathnod-epoch-seconds"), "604800");
     assert.deepEqual(await response.json(), await f.slots());
     for (const query of ["", "?epoch=42&epoch=43", "?epoch=42&protocol_id=1&protocol_id=2", "?epoch=42&s_obs=secret", "?epoch=-1"]) {
       assert.equal((await fetch(route + query)).status, 400);

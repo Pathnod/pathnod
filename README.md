@@ -60,6 +60,10 @@ running system yet.
   generation APIs on a supported iPhone and can export local evidence for the
   verifier. The S1 challenge app also supports persistent observer credentials
   and enrollment against the DEV-26 service.
+  [DEV-30](docs/dev30-observation-session.md) adds a foreground observation
+  collector with eligibility, observer-bound challenges, optional coarse signals
+  and a persistent local cache. Physical validation passes; the original <5 s
+  collection target remains unmet with the unchanged firmware.
 - `PathnodDensityScan` is a measurement instrument for a two-hour field study,
   not the observer app: it counts BLE advertisers visible while it is open,
   never connects, never runs in the background, never asks for location, and
@@ -120,6 +124,7 @@ artifacts, or build output.
 - [DEV-27 protocol and device registry](docs/dev27-protocol-registry.md)
 - [DEV-28 batched observer-root publication](docs/dev28-root-publication.md)
 - [DEV-29 device observation-slot eligibility](docs/dev29-device-eligibility.md)
+- [DEV-30 iPhone observation session](docs/dev30-observation-session.md)
 
 ## Contributing
 

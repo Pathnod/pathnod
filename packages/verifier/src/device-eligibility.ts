@@ -87,6 +87,10 @@ export class DeviceEligibilityService {
   }
 
   async slots(deviceID: unknown, epochValue: unknown, protocolID?: unknown): Promise<DeviceSlots> {
+    return (await this.quote(deviceID, epochValue, protocolID)).slots;
+  }
+
+  async quote(deviceID: unknown, epochValue: unknown, protocolID?: unknown): Promise<{ slots: DeviceSlots; epochSeconds: number }> {
     const device = id(deviceID), epoch = epochNumber(epochValue);
     const protocol = protocolID === undefined ? this.#protocol : id(protocolID);
     if (protocol.every(byte => byte === 0)) throw new EligibilityError("invalid_input");
@@ -110,17 +114,17 @@ export class DeviceEligibilityService {
       const result = { protocol_id: `0x${protocol.toString("hex")}`, policy_version: config.policyVersion };
       if (deviceAccount === null) {
         if (epochAccount !== null) throw Error();
-        return { registered: false, ...result, open_slots: 0, reward: "0" };
+        return { slots: { registered: false, ...result, open_slots: 0, reward: "0" }, epochSeconds: config.epochSeconds };
       }
       const record = decodeDevice(data(deviceAccount));
       if (!record.deviceId.equals(device) || !deviceId(record.key).equals(device) || record.key.every(byte => byte === 0) ||
           record.curve !== 1 || record.registeredAt <= 0n) throw Error();
       const state = epochAccount === null ? undefined : decodeDeviceEpoch(data(epochAccount));
       if (state && state.paidSlotsUsed > state.independentObservers) throw Error();
-      return { registered: true, ...result,
+      return { slots: { registered: true, ...result,
         open_slots: Math.max(0, config.slotsPerEpoch - (state?.paidSlotsUsed ?? 0)),
         reward: decimalReward(config.rewardPerSlot),
-      };
+      }, epochSeconds: config.epochSeconds };
     } catch { throw new EligibilityError("account_mismatch"); }
   }
 }

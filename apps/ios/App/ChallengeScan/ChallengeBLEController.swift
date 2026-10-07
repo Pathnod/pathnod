@@ -1,6 +1,8 @@
 import CoreBluetooth
 import Foundation
 import PathnodChallengeCore
+import PathnodObservationCore
+import PathnodObserverEnrollment
 import Security
 import SwiftUI
 
@@ -17,6 +19,8 @@ extension CBCentralManager: ChallengeCentral {}
 
 /// What the iPhone learned about the connected device, for the DEV-23 record.
 struct DeviceSummary: Equatable {
+    let publicKeyHex: String
+    let deviceIDHex: String
     let deviceIDPrefix: String
     let advertisedIdentity: DeviceProtocolV0.AdvertisedIdentity
     let capabilities: UInt32
@@ -29,6 +33,8 @@ struct DeviceSummary: Equatable {
     init(info: DeviceProtocolV0.Info, advertisedIdentity: DeviceProtocolV0.AdvertisedIdentity,
          maximumWriteLength: Int) {
         deviceIDPrefix = info.deviceID.prefix(8).hexString
+        deviceIDHex = info.deviceID.hexString
+        publicKeyHex = info.publicKey.hexString
         self.advertisedIdentity = advertisedIdentity
         capabilities = info.capabilities
         capabilityNames = info.capabilitySet.names
@@ -44,6 +50,17 @@ extension Data {
 }
 
 @MainActor
+struct ObservationRequest {
+    let client: EligibilityClient
+    let credential: ObserverCredential
+    let cache: any ObservationCache
+    let sensors: ObservationSensors
+    let useLocation: Bool
+    let useMotion: Bool
+    let allowUnpaid: Bool
+}
+
+@MainActor
 final class ChallengeBLEController: NSObject, ObservableObject,
     @preconcurrency CBCentralManagerDelegate, @preconcurrency CBPeripheralDelegate {
     @Published private(set) var status = "Ready to scan for a Pathnod device."
@@ -52,10 +69,14 @@ final class ChallengeBLEController: NSObject, ObservableObject,
     @Published private(set) var medianNotificationRTTMilliseconds: Double?
     @Published private(set) var errorMessage: String?
     @Published private(set) var isRunning = false
+    @Published private(set) var observationCapture: ObservationCapture?
+    @Published private(set) var eligibilityQuote: ObservationEligibility?
+    @Published private(set) var restoredObservation = false
+    @Published private(set) var overallDurationMilliseconds: Double?
 
     private enum Stage {
-        case idle, waitingForRadio, scanning, connecting, services, characteristics
-        case info, subscribing, pacing, challenge, readFallback, finished, failed, interrupted
+        case idle, preparingService, waitingForRadio, scanning, connecting, services, characteristics
+        case info, preflight, subscribing, pacing, challenge, readFallback, finished, failed, interrupted
     }
 
     /// Service Data arrives in the ESP32 scan response, which can be reported in a
@@ -82,6 +103,19 @@ final class ChallengeBLEController: NSObject, ObservableObject,
     private var discoveryGrace: Timer?
     private var pacing: Timer?
     private var isSceneActive = true
+    private var observationRequest: ObservationRequest?
+    private var observationContext: ObservationContext?
+    private var cacheKey: ObservationCacheKey?
+    private var preflightTask: Task<Void, Never>?
+    private var generation = UUID()
+    private var notificationReady = false
+    private var connectedStartedAt: Double?
+    private var rssiTimer: Timer?
+    private var rssiSamples: [Int8] = []
+    private var latestRSSI: Int8?
+    private var challengeRSSI: [Int8] = []
+    private var servicePrepared = false
+    private var requestStartedAt: Double?
 
     init(makeCentral: @escaping CentralFactory = {
         CBCentralManager(delegate: $0, queue: .main)
@@ -113,9 +147,38 @@ final class ChallengeBLEController: NSObject, ObservableObject,
         return lines.joined(separator: "\n")
     }
 
+    var observationReport: String {
+        guard let capture = observationCapture else { return "No completed observation session." }
+        return ["Pathnod local observation session",
+            "device_id prefix: \(capture.deviceID.prefix(8).hexString)",
+            "epoch: \(capture.epoch)", "epoch seconds: \(capture.epochSeconds)",
+            "verified signatures: \(capture.challenges.count)",
+            "median notification RTT: \(capture.challenges.map(\.roundTripMilliseconds).sorted()[1]) ms",
+            String(format: "connection-to-collection: %.1f ms", capture.durationMilliseconds),
+            String(format: "preparation + discovery + collection: %.1f ms", overallDurationMilliseconds ?? 0),
+            "RSSI samples: \(capture.local.rssiSamples.count)",
+            "GPS included: \(!capture.local.geohash6.allSatisfy { $0 == 0 })",
+            "barometer included: \(capture.local.barometerHPATimes10 != 0)",
+            "motion class: \(capture.local.motionClass)",
+            "restored from cache: \(restoredObservation)"].joined(separator: "\n")
+    }
+
     func start() {
+        startSession(observation: nil)
+    }
+
+    func startObservation(_ request: ObservationRequest) {
+        startSession(observation: request)
+    }
+
+    private func startSession(observation: ObservationRequest?) {
         guard !isRunning, isSceneActive else { return }
         stopConnection()
+        requestStartedAt = ProcessInfo.processInfo.systemUptime
+        overallDurationMilliseconds = nil; servicePrepared = false
+        observationRequest = observation
+        observationCapture = nil; eligibilityQuote = nil; restoredObservation = false
+        notificationReady = false; rssiSamples = []; latestRSSI = nil; challengeRSSI = []
         results = []
         device = nil
         medianNotificationRTTMilliseconds = nil
@@ -123,6 +186,26 @@ final class ChallengeBLEController: NSObject, ObservableObject,
         session = nil
         advertisedServiceData = nil
         isRunning = true
+        if let observation {
+            stage = .preparingService; status = "Preparing the service connection before scanning…"; setTimeout(10)
+            let token = generation
+            preflightTask = Task { [weak self] in
+                do {
+                    try await observation.client.prepareConnection()
+                    guard let self, self.isRunning, self.generation == token else { return }
+                    self.servicePrepared = true
+                    if self.isSceneActive { self.beginBluetooth() }
+                } catch {
+                    guard let self, self.isRunning, self.generation == token else { return }
+                    self.fail(error.localizedDescription)
+                }
+            }
+            return
+        }
+        beginBluetooth()
+    }
+
+    private func beginBluetooth() {
         stage = .waitingForRadio
         status = "Checking Bluetooth…"
         setTimeout(10)
@@ -148,10 +231,12 @@ final class ChallengeBLEController: NSObject, ObservableObject,
 
     func handleScenePhase(_ phase: ScenePhase) {
         isSceneActive = phase == .active
-        if phase == .active, isRunning, stage == .waitingForRadio {
+        if phase == .active, isRunning, stage == .preparingService, servicePrepared {
+            beginBluetooth()
+        } else if phase == .active, isRunning, stage == .waitingForRadio {
             setTimeout(10)
             if let central { handleRadioState(central.state) }
-        } else if phase == .inactive, isRunning, stage == .waitingForRadio {
+        } else if phase == .inactive, isRunning, (stage == .waitingForRadio || stage == .preparingService) {
             // The first Bluetooth permission alert can make the scene inactive.
             timeout?.invalidate()
             timeout = nil
@@ -206,6 +291,11 @@ final class ChallengeBLEController: NSObject, ObservableObject,
     }
 
     private func stopConnection() {
+        generation = UUID()
+        preflightTask?.cancel(); preflightTask = nil
+        rssiTimer?.invalidate(); rssiTimer = nil
+        observationRequest?.sensors.stop()
+        observationRequest = nil; observationContext = nil; cacheKey = nil
         timeout?.invalidate()
         timeout = nil
         discoveryGrace?.invalidate()
@@ -235,9 +325,22 @@ final class ChallengeBLEController: NSObject, ObservableObject,
     }
 
     private func finish() {
+        let isObservation = observationRequest != nil
+        if let request = observationRequest {
+            do {
+                guard let info = session?.info, let context = observationContext, let cacheKey,
+                      let started = connectedStartedAt else { throw ObservationError.invalidCapture }
+                let capture = try ObservationCapture(info: info, context: context, results: results, challengeRSSI: challengeRSSI,
+                    local: request.sensors.snapshot(rssi: rssiSamples),
+                    durationMilliseconds: (ProcessInfo.processInfo.systemUptime - started) * 1000)
+                try request.cache.save(capture, for: cacheKey)
+                observationCapture = capture
+                overallDurationMilliseconds = requestStartedAt.map { (ProcessInfo.processInfo.systemUptime - $0) * 1000 }
+            } catch { fail(error.localizedDescription); return }
+        }
         stage = .finished
         isRunning = false
-        status = "Three signatures verified on this iPhone."
+        status = isObservation ? "Session collected and saved; three signatures verified." : "Three signatures verified on this iPhone."
         medianNotificationRTTMilliseconds = session?.medianNotificationRTTMilliseconds
         stopConnection()
         session = nil
@@ -283,14 +386,14 @@ final class ChallengeBLEController: NSObject, ObservableObject,
             return
         }
         do {
+            traceObservation("write-\(session.results.count + 1)")
             let nonce = try randomNonce()
             stage = .challenge
             status = "Challenge \(session.results.count + 1) of 3…"
             setTimeout(15)
-            // DEV-10 has no production observation epoch or hint yet.
             let wire = try session.beginChallenge(
-                nonce: nonce, observationEpoch: 0,
-                observationHint: Data(repeating: 0, count: 8),
+                nonce: nonce, observationEpoch: observationContext?.epoch ?? 0,
+                observationHint: observationContext?.observationHint ?? Data(repeating: 0, count: 8),
                 startedAt: ProcessInfo.processInfo.systemUptime
             )
             self.session = session
@@ -303,6 +406,10 @@ final class ChallengeBLEController: NSObject, ObservableObject,
     private func handleResponse(_ data: Data, from peripheral: CBPeripheral) {
         guard stage == .challenge || stage == .readFallback else { return }
         if data.count < DeviceProtocolV0.responseHeaderLength {
+            if observationRequest != nil {
+                fail("A complete notification is required for an observation. Retry with the device nearby.")
+                return
+            }
             if stage == .challenge, let responseCharacteristic {
                 stage = .readFallback
                 status = "Notification was too short; reading the full response…"
@@ -327,6 +434,11 @@ final class ChallengeBLEController: NSObject, ObservableObject,
             case .ignoredDuplicate:
                 return
             case let .verified(result):
+                traceObservation("verified-\(result.attempt)")
+                if observationRequest != nil {
+                    guard let latestRSSI else { fail(ObservationError.invalidSignals.localizedDescription); return }
+                    challengeRSSI.append(latestRSSI)
+                }
                 results.append(result)
                 if session.isComplete { finish() } else { scheduleNextChallenge() }
             }
@@ -368,6 +480,10 @@ final class ChallengeBLEController: NSObject, ObservableObject,
     }
 
     private func connect(_ peripheral: CBPeripheral, serviceData: Data?) {
+        guard peripheral.state == .disconnected else {
+            self.peripheral = nil
+            return
+        }
         discoveryGrace?.invalidate()
         discoveryGrace = nil
         central?.stopScan()
@@ -377,11 +493,24 @@ final class ChallengeBLEController: NSObject, ObservableObject,
         stage = .connecting
         status = "Connecting to the device…"
         setTimeout(10)
+        connectedStartedAt = ProcessInfo.processInfo.systemUptime
+        traceObservation("connect")
         central?.connect(peripheral, options: nil)
     }
 
     func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
         guard stage == .connecting, self.peripheral === peripheral else { return }
+        traceObservation("connected")
+        if let request = observationRequest {
+            request.sensors.start(useLocation: request.useLocation, useMotion: request.useMotion)
+            peripheral.readRSSI()
+            rssiTimer = Timer.scheduledTimer(withTimeInterval: 0.4, repeats: true) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    guard let self, self.isRunning, self.rssiSamples.count < 20 else { return }
+                    self.peripheral?.readRSSI()
+                }
+            }
+        }
         stage = .services
         status = "Discovering the Pathnod service…"
         setTimeout(10)
@@ -400,7 +529,7 @@ final class ChallengeBLEController: NSObject, ObservableObject,
         _ central: CBCentralManager, didDisconnectPeripheral peripheral: CBPeripheral,
         error: Error?
     ) {
-        if isRunning, self.peripheral === peripheral {
+        if isRunning, stage != .scanning, stage != .waitingForRadio, self.peripheral === peripheral {
             fail("The device disconnected before all three challenges were verified.")
         }
     }
@@ -469,6 +598,7 @@ final class ChallengeBLEController: NSObject, ObservableObject,
                     maximumWriteLength: peripheral.maximumWriteValueLength(for: .withoutResponse)
                 )
                 session = ChallengeSession(info: info)
+                if observationRequest != nil { beginObservationPreflight(info: info); return }
                 guard let responseCharacteristic else {
                     fail("The response characteristic disappeared.")
                     return
@@ -489,12 +619,14 @@ final class ChallengeBLEController: NSObject, ObservableObject,
         _ peripheral: CBPeripheral, didUpdateNotificationStateFor characteristic: CBCharacteristic,
         error: Error?
     ) {
-        guard stage == .subscribing, self.peripheral === peripheral,
+        guard (stage == .subscribing || stage == .preflight), self.peripheral === peripheral,
               characteristic.uuid == responseUUID else { return }
         guard error == nil, characteristic.isNotifying else {
             fail("Could not subscribe to signed responses.")
             return
         }
+        notificationReady = true
+        if stage == .preflight { return }
         scheduleNextChallenge()
     }
 
@@ -505,5 +637,60 @@ final class ChallengeBLEController: NSObject, ObservableObject,
         guard stage == .challenge || stage == .readFallback,
               self.peripheral === peripheral, characteristic.uuid == challengeUUID else { return }
         if error != nil { fail("The device rejected the challenge write.") }
+    }
+
+    func peripheral(_ peripheral: CBPeripheral, didReadRSSI RSSI: NSNumber, error: Error?) {
+        guard isRunning, observationRequest != nil, self.peripheral === peripheral, error == nil,
+              (-127...0).contains(RSSI.intValue) else { return }
+        latestRSSI = Int8(RSSI.intValue)
+        if rssiSamples.count < 20 { rssiSamples.append(Int8(RSSI.intValue)) }
+    }
+
+    private func beginObservationPreflight(info: DeviceProtocolV0.Info) {
+        traceObservation("info")
+        guard let request = observationRequest, let characteristic = responseCharacteristic else {
+            fail("The observation configuration is incomplete."); return
+        }
+        stage = .preflight; status = "Checking device eligibility…"; setTimeout(15)
+        peripheral?.setNotifyValue(true, for: characteristic)
+        let token = generation
+        preflightTask = Task { [weak self] in
+            do {
+                let quote = try await request.client.resolve(deviceID: info.deviceID,
+                    timeMilliseconds: ObservationEncoding.timeMilliseconds(Date()))
+                guard let self, self.isRunning, self.generation == token else { return }
+                self.traceObservation("eligibility")
+                self.eligibilityQuote = quote.quote
+                guard quote.quote.registered else { throw ObservationError.unknownDevice }
+                let context = try ObservationContext(protocolID: ObservationEncoding.id(quote.quote.protocolID),
+                    secret: request.credential.secretBytes, timeMilliseconds: quote.observationTimeMilliseconds, epochSeconds: quote.epochSeconds)
+                let key = try ObservationCacheKey(commitment: request.credential.commitmentBytes,
+                    protocolID: context.protocolID, deviceID: info.deviceID, epoch: context.epoch)
+                if let stored = try request.cache.completed(for: key) {
+                    guard stored.protocolID == context.protocolID, stored.deviceID == info.deviceID,
+                          stored.epoch == context.epoch, stored.pseudonym == context.pseudonym else { throw ObservationError.invalidCapture }
+                    self.observationCapture = stored; self.restoredObservation = true
+                    self.stage = .finished; self.isRunning = false
+                    self.status = "Already collected this epoch. Restored the saved session without sending challenges."
+                    self.overallDurationMilliseconds = self.requestStartedAt.map { (ProcessInfo.processInfo.systemUptime - $0) * 1000 }
+                    self.stopConnection(); self.session = nil; return
+                }
+                try quote.requireCollectionPermission(allowUnpaid: request.allowUnpaid)
+                self.observationContext = context; self.cacheKey = key
+                self.stage = .subscribing; self.status = "Preparing signed challenges…"; self.setTimeout(10)
+                if self.notificationReady { self.scheduleNextChallenge() }
+            } catch {
+                guard let self, self.isRunning, self.generation == token else { return }
+                self.fail(error.localizedDescription)
+            }
+        }
+    }
+
+    private func traceObservation(_ stage: String) {
+        #if DEBUG
+        if ProcessInfo.processInfo.environment["PATHNOD_DEV30_HARDWARE"] == "1", let start = connectedStartedAt {
+            print(String(format: "DEV30_TIMING %@ %.1f ms", stage, (ProcessInfo.processInfo.systemUptime - start) * 1000))
+        }
+        #endif
     }
 }

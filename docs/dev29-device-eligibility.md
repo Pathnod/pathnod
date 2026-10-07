@@ -88,6 +88,11 @@ service does not scan the registry or guess which protocol owns a device.
 Responses use `Cache-Control: no-store`. RPC requests time out after ten seconds;
 raw RPC URLs, credentials and errors are not returned to the client.
 
+DEV-30 adds `X-Pathnod-Epoch-Seconds` to successful responses, from the same
+configuration snapshot. The five JSON fields are preserved. The iPhone uses
+this header to resolve protocol-specific epoch lengths and requery the correct
+epoch before sending a challenge.
+
 ## Server configuration
 
 Keep the App Attest/enrollment configuration from the
