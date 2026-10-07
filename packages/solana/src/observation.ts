@@ -10,7 +10,10 @@ import {
   bytes32,
   discriminator,
   registryAddresses,
+  TOKEN_PROGRAM,
+  DEVNET_USDC,
 } from "./index.ts";
+import { paymentAddresses } from './payments.ts';
 
 export const OBSERVATION_COMMITMENT_SIZE = 214;
 export const DEVICE_EPOCH_SIZE = 587;
@@ -69,6 +72,7 @@ export function submitObservation(
   transcriptHash: Uint8Array,
   evidenceHash: Uint8Array,
   proofBytes: Uint8Array,
+  mint: PublicKey = DEVNET_USDC,
 ): TransactionInstruction {
   const proof = Buffer.from(proofBytes);
   if (proof.length !== 480)
@@ -93,6 +97,7 @@ export function submitObservation(
     proof.subarray(384, 416),
   );
   const root = addresses.root(proof.subarray(256, 288));
+  const payments = paymentAddresses(program, protocol, proof.subarray(416,448));
   return new TransactionInstruction({
     programId: program,
     data: Buffer.concat([
@@ -115,6 +120,13 @@ export function submitObservation(
       },
       { pubkey: payer, isWritable: true, isSigner: true },
       { pubkey: SystemProgram.programId, isWritable: false, isSigner: false },
+      { pubkey: payments.settings, isWritable: false, isSigner: false },
+      { pubkey: mint, isWritable: false, isSigner: false },
+      { pubkey: addresses.escrow, isWritable: true, isSigner: false },
+      { pubkey: payments.payout, isWritable: true, isSigner: false },
+      { pubkey: payments.vault, isWritable: true, isSigner: false },
+      { pubkey: payments.feeVault, isWritable: true, isSigner: false },
+      { pubkey: TOKEN_PROGRAM, isWritable: false, isSigner: false },
     ],
   });
 }
@@ -125,13 +137,13 @@ export function decodeObservationVerifier(data: Uint8Array) {
     !bytes
       .subarray(0, 8)
       .equals(discriminator("account", "ObservationVerifierInfo")) ||
-    bytes[40] !== 1 ||
+    bytes[40] !== 2 ||
     bytes[41] !== 7
   )
     throw Error("Invalid observation verifier metadata");
   return {
     keyDigest: bytes.subarray(8, 40).toString("hex"),
-    abiVersion: 1,
+    abiVersion: 2,
     publicInputs: 7,
   };
 }
