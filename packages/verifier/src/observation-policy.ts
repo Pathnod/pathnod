@@ -119,7 +119,10 @@ export class ObservationPolicyService {
     const t = decodeObservationTranscript(Buffer.from(envelope.transcript, "base64"), 0);
     let snapshot: Awaited<ReturnType<ObservationPolicySource["snapshot"]>>;
     try { snapshot = await this.#source.snapshot(t); }
-    catch { throw new ObservationPolicyError("observation_dependency_unavailable"); }
+    catch (error) {
+      if (error instanceof ObservationPolicyError) throw error;
+      throw new ObservationPolicyError("observation_dependency_unavailable");
+    }
     const receivedDuringRead = this.#previous(hash, digest); if (receivedDuringRead) return receivedDuringRead;
     const device = Buffer.from(t.deviceID).toString("hex");
     if (!snapshot.device || snapshot.device.curve !== t.curve ||

@@ -12,6 +12,8 @@ import { decodeObservationTranscript, encodeObservationTranscript, type Observat
 import type { ObservationEnvelope } from "../src/observation-inbox.ts";
 import { PinnedGroth16Verifier } from "../src/observation-groth16.ts";
 import { createEnrollmentServer } from "../src/enrollment-http.ts";
+import { PublicKey } from "@solana/web3.js";
+import { SolanaObservationPolicySource } from "../src/observation-solana.ts";
 
 const vector = JSON.parse(readFileSync(new URL("../../../fixtures/observations/transcript-v0.json", import.meta.url), "utf8")).vectors[0];
 const policy = { appID: "U5MCCC24G5.xyz.pathnod.appattestspike", environment: "development", allowedValidationCategories: [3], allowedBundleVersions: [] } as const;
@@ -163,6 +165,53 @@ test("DEV-33: HTTP validated contract and stable 422/503 rejections", async () =
     f.setUnavailable(); const t = structuredClone(f.t); t.nullifier = Buffer.alloc(32, 1);
     assert.equal((await post(f.envelope(t, 2))).status, 503);
   } finally { await new Promise<void>(resolve => server.close(() => resolve())); f.close(); }
+});
+test("DEV-33: unsupported protocol is permanent without RPC or mutation; chain failures remain retryable", async () => {
+  const f = await fixture();
+  const program = new PublicKey("5V9pXQN5dQkRBSTsaezBg6qLRC3mbLj21Ny3j7xtuHTd");
+  let rpcCalls = 0, outage = true;
+  const reader = { read: async () => {
+    rpcCalls++;
+    if (outage) throw Error("test RPC outage");
+    return [null, null, null, null]; // Missing/untrusted state is not a permanent input rejection.
+  } };
+  const unsupportedProtocol = Buffer.from(f.t.protocolID);
+  unsupportedProtocol[0] = unsupportedProtocol[0]! ^ 1;
+  let source = new SolanaObservationPolicySource(reader, program, unsupportedProtocol, "test-only");
+  const checked = new ObservationPolicyService(f.path, policy,
+    { target: "test-only/dev33", snapshot: t => source.snapshot(t) },
+    { verify: async () => { assert.fail("rejected input must not reach proof verification"); } },
+    { clock: () => Number(f.t.observationTimeMilliseconds) });
+  const server = createEnrollmentServer(f.enrollment, undefined, undefined, undefined, checked);
+  const unchanged = () => {
+    assert.equal(f.gate.getKey(f.keyID)!.counter, 0);
+    assert.equal(f.db.prepare("SELECT COUNT(*) AS n FROM observation_device_counters_v0").get()!.n, 0);
+    assert.equal(f.db.prepare("SELECT COUNT(*) AS n FROM observation_validations_v0").get()!.n, 0);
+  };
+  try {
+    await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address(); assert.ok(address && typeof address !== "string");
+    const envelope = f.envelope();
+    const post = () => fetch(`http://127.0.0.1:${address.port}/observations`,
+      { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(envelope) });
+    // Use the real Solana source, not a mock throwing the expected policy error.
+    const unsupported = await post();
+    assert.equal(unsupported.status, 422);
+    assert.deepEqual(await unsupported.json(), { error: "E_DEVICE_UNKNOWN" });
+    assert.equal(rpcCalls, 0); unchanged();
+    source = new SolanaObservationPolicySource(reader, program, Buffer.from(f.t.protocolID), "test-only");
+    const unavailable = await post();
+    assert.equal(unavailable.status, 503);
+    assert.deepEqual(await unavailable.json(), { error: "observation_dependency_unavailable" });
+    assert.equal(rpcCalls, 1); unchanged();
+    outage = false;
+    const untrusted = await post();
+    assert.equal(untrusted.status, 503);
+    assert.deepEqual(await untrusted.json(), { error: "observation_dependency_unavailable" });
+    assert.equal(rpcCalls, 2); unchanged();
+  } finally {
+    await new Promise<void>(resolve => server.close(() => resolve())); checked.close(); f.close();
+  }
 });
 test("DEV-33: actual Mopro proof, pinned VK, and real device/test-observer signatures", async () => {
   const f = await fixture();

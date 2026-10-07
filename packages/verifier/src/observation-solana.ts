@@ -1,6 +1,6 @@
 import { Connection, PublicKey, type AccountInfo } from "@solana/web3.js";
 import { UPGRADEABLE_LOADER, activeRoots, decodeEnrollment, decodeProtocol, decodeDevice, registryAddresses } from "@pathnod/solana";
-import type { ObservationPolicySource } from "./observation-policy.ts";
+import { ObservationPolicyError, type ObservationPolicySource } from "./observation-policy.ts";
 import type { ObservationTranscript } from "./observation-transcript.ts";
 
 export interface ObservationAccountReader {
@@ -40,7 +40,8 @@ export class SolanaObservationPolicySource implements ObservationPolicySource {
       program, Buffer.from(protocolHex, "hex"), genesis, minimumRSSI, policyVersion);
   }
   async snapshot(t: ObservationTranscript) {
-    if (!this.#protocol.equals(t.protocolID)) throw Error("Unsupported configured protocol");
+    // Caller-supplied protocol mismatch is permanent, unlike unavailable/untrusted RPC state.
+    if (!this.#protocol.equals(t.protocolID)) throw new ObservationPolicyError("E_DEVICE_UNKNOWN");
     const addresses = registryAddresses(this.#program, this.#protocol);
     const nullifier = PublicKey.findProgramAddressSync([Buffer.from("obs"), t.nullifier], this.#program)[0];
     const accounts = await this.#reader.read([addresses.config, addresses.device(t.deviceID), addresses.enrollment, nullifier]);

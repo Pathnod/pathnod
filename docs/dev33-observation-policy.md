@@ -16,7 +16,7 @@ for HTTP framing). Structurally valid failures have this stable precedence:
 
 | Code | Check |
 | --- | --- |
-| E_DEVICE_UNKNOWN | Registered device ID, registry key and curve; domain-separated SHA-256 device ID matches. |
+| E_DEVICE_UNKNOWN | Transcript protocol matches the configured protocol; registered device ID, registry key and curve; domain-separated SHA-256 device ID matches. |
 | E_DEV_SIG | All three Ed25519 signatures over SHA-256 of reconstructed DEV_MSG_V0, with BE wire integers, pseudonym prefix and evidence hash. |
 | E_DEV_COUNTER | Capability bit 1 enables strictly increasing counters within the observation and against durable last-seen state. |
 | E_RTT | Median of three RTTs ≤400 ms. |
@@ -34,6 +34,9 @@ does not weaken signature, app, environment or counter checks.
 Policy rejections return `422 {"error":"E_…"}`. Missing/untrusted RPC data,
 unavailable proof process or incompatible chain configuration return
 `503 observation_dependency_unavailable`; they never become “unknown device”.
+A caller-supplied transcript for another protocol is instead a permanent
+`422 E_DEVICE_UNKNOWN`, rejected before any RPC call or counter mutation.
+Retrying that envelope against the same configured service cannot fix it.
 The HTTP endpoint permits at most two in-flight validations (`429 observation_busy`),
 128 KiB bodies, and a 15-second request-body timeout. Groth16 runs in a disposable
 child process with a 15-second deadline and 128 MiB V8 old-space limit, killed
