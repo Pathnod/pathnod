@@ -7,7 +7,7 @@ description = "Host-only verification of Pathnod's canonical Poseidon vectors"
 publish = false
 
 [dependencies]
-ark-bn254 = "=0.5.0"
+ark-bn254 = "=0.6.0"
 ark-ff = "=0.5.0"
 light-poseidon = "=0.4.0"
 num-bigint = "=0.4.6"
