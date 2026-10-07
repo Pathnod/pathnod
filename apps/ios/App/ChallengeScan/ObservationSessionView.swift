@@ -1,4 +1,5 @@
 import Foundation
+import PathnodAppAttest
 import PathnodObservationCore
 import PathnodObserverEnrollment
 import SwiftUI
@@ -8,6 +9,9 @@ import UIKit
 struct ObservationSessionView: View {
     @ObservedObject var controller: ChallengeBLEController
     @StateObject private var sensors = ObservationSensors()
+    @StateObject private var submission = ObservationSubmissionModel()
+    @Environment(\.scenePhase) private var scenePhase
+    @AppStorage("observationSubmissionPrivacyV0") private var submissionReviewed = false
     @AppStorage("observerEnrollmentServerURL") private var serverURL = ""
     @AppStorage("observationPrivacyPreviewV1") private var privacyReviewed = false
     @State private var includeLocation = false
@@ -90,10 +94,31 @@ struct ObservationSessionView: View {
                         .font(.footnote).foregroundStyle(.secondary)
                     Button("Copy session summary") { UIPasteboard.general.string = controller.observationReport }
                 }.accessibilityIdentifier("completedObservation")
+                Section("Send to the verifier") {
+                    Text("The verifier receives the signed device replies, timings, signal samples, optional approximate location, scoped pseudonym, nullifier, membership proof and your opaque App Attest key ID/assertion. Your observer secret and precise coordinates are not sent. Receipt does not mean policy approval, on-chain acceptance or payment.")
+                        .font(.footnote)
+                    Toggle("I agree to send this observation", isOn: $submissionReviewed)
+                        .onChange(of: submissionReviewed) { if !$0 { submission.cancelPreparation() } }
+                    Button(submission.busy ? "Preparing…" : "Prove and queue observation") {
+                        submission.prepare(capture: capture, serverURL: serverURL)
+                    }.disabled(!submissionReviewed || submission.busy || controller.isRunning)
+                        .accessibilityIdentifier("submitObservation")
+                    Text(submission.status).accessibilityIdentifier("submissionStatus")
+                }
+            }
+            Section("Submission queue") {
+                Text("\(submission.pending) queued, \(submission.rejected) rejected. Pending envelopes are retried when this screen returns to the foreground; failed sends keep the original assertion. Rejected envelopes remain local for diagnosis.")
+                    .font(.footnote)
+                Text("Retry and preparation use the selected service only. Envelopes for previous services remain saved; restore their original URL to retry them. Changing the URL never transfers an envelope.")
+                    .font(.footnote).foregroundStyle(.secondary)
+                Button("Retry due observations") { Task { await submission.retry(serverURL: serverURL) } }
+                    .disabled(submission.busy || serverURL.isEmpty)
             }
         }
         .navigationTitle("Observe a device")
         .onDisappear { if controller.isRunning { controller.cancel() } }
+        .task { await submission.retry(serverURL: serverURL) }
+        .onChange(of: scenePhase) { if $0 == .active { Task { await submission.retry(serverURL: serverURL) } } }
     }
 
     private func start() {
@@ -114,5 +139,123 @@ struct ObservationSessionView: View {
                 sensors: sensors, useLocation: includeLocation, useMotion: includeMotion, allowUnpaid: allowUnpaid)
             preparationError = nil; controller.startObservation(request)
         } catch { preparationError = error.localizedDescription }
+    }
+}
+
+@MainActor
+private struct ObservationAppAttester: ObservationAssertionProvider {
+    let client = AppAttestClient(service: SystemAppAttestService(),
+        store: KeychainAppAttestKeyStore(service: "xyz.pathnod.challengescan.appattest"))
+    func assertion(for transcriptHash: Data) async throws -> (keyID: String, object: Data) {
+        let result = try await client.assert(clientDataHash: transcriptHash)
+        return (result.keyID, result.object)
+    }
+}
+
+@MainActor
+private struct ObservationMoproProver: ObservationProver {
+    func prove(_ witness: ObservationWitness) async throws -> ObservationZK {
+        #if PATHNOD_MOPRO
+        guard let zkey = Bundle.main.path(forResource: "observation_final", ofType: "zkey") else {
+            throw ObservationSubmissionError.proverUnavailable
+        }
+        let input = String(decoding: try JSONEncoder().encode(witness.inputs), as: UTF8.self)
+        return try await Task.detached(priority: .userInitiated) {
+            let result = try generateCircomProof(zkeyPath: zkey, circuitInputs: input, proofLib: .arkworks)
+            guard result.inputs == witness.publicInputs,
+                  try verifyCircomProof(zkeyPath: zkey, proofResult: result, proofLib: .arkworks),
+                  result.proof.protocol == "groth16", ["bn128", "bn254"].contains(result.proof.curve) else {
+                throw ObservationSubmissionError.proofMismatch
+            }
+            return ObservationZK(proof: ObservationGroth16Proof(
+                a: [result.proof.a.x, result.proof.a.y, result.proof.a.z],
+                b: [result.proof.b.x, result.proof.b.y, result.proof.b.z],
+                c: [result.proof.c.x, result.proof.c.y, result.proof.c.z]), publicInputs: result.inputs)
+        }.value
+        #else
+        throw ObservationSubmissionError.proverUnavailable
+        #endif
+    }
+}
+
+@MainActor
+private final class ObservationSubmissionModel: ObservableObject {
+    @Published var busy = false
+    @Published var pending = 0
+    @Published var rejected = 0
+    @Published var status = "Not sent."
+    private var queue: ObservationOutbox?
+    private var preparationTask: Task<Void, Never>?
+
+    private func outbox() throws -> ObservationOutbox {
+        if let queue { return queue }
+        guard let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else {
+            throw ObservationError.cacheUnavailable
+        }
+        let value = ObservationOutbox(url: support.appending(path: "Pathnod/observation-outbox-v0.json"))
+        queue = value; return value
+    }
+    private func client(_ server: String) throws -> ObservationHTTPClient {
+        guard let url = URL(string: server) else { throw ObservationSubmissionError.invalidEndpoint }
+        #if DEBUG
+        let local = true
+        #else
+        let local = false
+        #endif
+        return try ObservationHTTPClient(baseURL: url, allowLocalHTTP: local)
+    }
+    private func refresh() {
+        do {
+            let entries = try outbox().entries()
+            pending = entries.filter { !$0.rejected }.count; rejected = entries.filter(\.rejected).count
+        } catch { status = "Queue could not be read: \(error.localizedDescription)" }
+    }
+    func cancelPreparation() { preparationTask?.cancel() }
+    func prepare(capture: ObservationCapture, serverURL: String) {
+        guard !busy else { return }; busy = true
+        preparationTask = Task { await prepareImpl(capture: capture, serverURL: serverURL) }
+    }
+    private func prepareImpl(capture: ObservationCapture, serverURL: String) async {
+        defer { busy = false; preparationTask = nil; refresh() }
+        do {
+            #if !PATHNOD_MOPRO
+            throw ObservationSubmissionError.proverUnavailable
+            #else
+            let http = try client(serverURL), queue = try outbox()
+            if try queue.hasPending(endpoint: http.endpoint) {
+                _ = try await queue.drain(client: http)
+                guard try !queue.hasPending(endpoint: http.endpoint) else {
+                    status = "Retry previous envelopes before creating another assertion."; return
+                }
+            }
+            let credential = try ObserverCredentialManager().loadOrCreate()
+            status = "Refreshing membership path…"
+            let enrollment = try await ObserverEnrollmentClient(serverURL: serverURL).refreshPath(commitment: "0x" + credential.commitmentHex)
+            let transcript = try ObservationTranscript(capture: capture, credential: credential, enrollment: enrollment)
+            let hash = try transcript.transcriptHash().hexString
+            if try queue.wasReceived(hash: hash, endpoint: http.endpoint) {
+                status = "This observation was already received. Not policy-validated or paid."; return
+            }
+            status = "Proving and signing the original transcript…"
+            let envelope = try await ObservationSubmission.prepare(capture: capture, credential: credential, enrollment: enrollment,
+                prover: ObservationMoproProver(), attester: ObservationAppAttester())
+            try Task.checkCancellation()
+            try queue.enqueue(envelope, endpoint: http.endpoint)
+            status = "Queued locally. Sending…"
+            let received = try await queue.drain(client: http)
+            status = received > 0 ? "Received by development verifier. Not policy-validated or paid." : "Queued; waiting for retry."
+            #endif
+        } catch ObservationSubmissionError.proverUnavailable {
+            status = "Mopro is not bundled in this build. Use the DEV-32 Mopro build; no fake proof or assertion was sent."
+        } catch { status = "Not confirmed received; session/envelope retained locally: \(error.localizedDescription)" }
+    }
+    func retry(serverURL: String) async {
+        guard !busy else { return }; busy = true; defer { busy = false; refresh() }
+        do {
+            let queue = try outbox()
+            guard try !queue.entries().isEmpty else { return }
+            let count = try await queue.drain(client: client(serverURL))
+            if count > 0 { status = "\(count) observation(s) received. Not policy-validated or paid." }
+        } catch { status = "Retry not confirmed; envelope retained locally: \(error.localizedDescription)" }
     }
 }

@@ -12,6 +12,8 @@ export {
   validateObservationTranscript, observationTranscriptHash, observationEvidenceHash,
 } from "./observation-transcript.ts";
 export type { ObservationTranscript, TranscriptChallenge, TranscriptLocalSignals } from "./observation-transcript.ts";
+export { parseObservationEnvelope, ObservationInboxError } from "./observation-inbox.ts";
+export type { ObservationEnvelope, ObservationReceipt } from "./observation-inbox.ts";
 export type { AppAttestChallengePurpose, IssuedAppAttestChallenge, IssuedAppAttestTrial } from "./app-attest-gate.ts";
 
 export { AppAttestVerifier, AppAttestVerificationError } from "./app-attest.ts";
