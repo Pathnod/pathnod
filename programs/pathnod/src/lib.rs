@@ -24,13 +24,13 @@ pub mod pathnod {
     use super::*;
 
     pub fn initialize_payments(ctx: Context<InitializePayments>) -> Result<()> {
-        payments::initialize(ctx)
+        payments::handle_initialize_payments(ctx)
     }
     pub fn update_fees(ctx: Context<UpdateFees>, fee_bps: u16) -> Result<()> {
-        payments::update_fees(ctx, fee_bps)
+        payments::handle_update_fees(ctx, fee_bps)
     }
     pub fn update_policy(ctx: Context<UpdatePolicy>, args: UpdatePolicyArgs) -> Result<()> {
-        payments::update_policy(ctx, args)
+        payments::handle_update_policy(ctx, args)
     }
     pub fn claim_payout(ctx: Context<ClaimPayout>, args: ClaimPayoutArgs) -> Result<()> {
         payments::claim(ctx, args)

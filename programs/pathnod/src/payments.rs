@@ -101,7 +101,7 @@ pub fn split_reward(gross: u64, fee_bps: u16) -> Result<(u64, u64)> {
     let fee = ((gross as u128) * u128::from(fee_bps) / 10_000) as u64;
     Ok((fee, gross - fee))
 }
-pub fn initialize(ctx: Context<InitializePayments>) -> Result<()> {
+pub fn handle_initialize_payments(ctx: Context<InitializePayments>) -> Result<()> {
     require_keys_neq!(
         ctx.accounts.treasury.key(),
         Pubkey::default(),
@@ -115,12 +115,12 @@ pub fn initialize(ctx: Context<InitializePayments>) -> Result<()> {
     });
     Ok(())
 }
-pub fn update_fees(ctx: Context<UpdateFees>, fee_bps: u16) -> Result<()> {
+pub fn handle_update_fees(ctx: Context<UpdateFees>, fee_bps: u16) -> Result<()> {
     split_reward(0, fee_bps)?;
     ctx.accounts.settings.fee_bps = fee_bps;
     Ok(())
 }
-pub fn update_policy(ctx: Context<UpdatePolicy>, args: UpdatePolicyArgs) -> Result<()> {
+pub fn handle_update_policy(ctx: Context<UpdatePolicy>, args: UpdatePolicyArgs) -> Result<()> {
     require!(
         args.policy_version > ctx.accounts.config.policy_version
             && args.verifier_pubkey != Pubkey::default()
