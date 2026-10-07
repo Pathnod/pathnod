@@ -268,7 +268,9 @@ private final class ObservationNoRedirects: NSObject, URLSessionTaskDelegate {
         guard !draining else { return 0 }; draining = true; defer { draining = false }
         let snapshot = try entries()
         var received = 0
-        for entry in snapshot where entry.endpoint == client.endpoint && !entry.rejected && entry.nextAttempt <= now {
+        for entry in snapshot where entry.endpoint == client.endpoint && !entry.rejected {
+            // An older assertion in backoff must not be overtaken by a newer counter.
+            guard entry.nextAttempt <= now else { break }
             try Task.checkCancellation()
             let hash = try entry.envelope.hashHex()
             do {

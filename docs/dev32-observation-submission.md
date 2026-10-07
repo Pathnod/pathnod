@@ -98,6 +98,10 @@ not automatically retried. The original capture remains in the DEV-30 cache if
 proof/assertion preparation fails before queueing. No timestamp is refreshed to
 make an old capture look fresh; DEV-33 must enforce epoch/freshness policy.
 
+For each endpoint, the first unrejected entry blocks newer entries even while
+its retry deadline is in the future. This FIFO rule survives restarts.
+
+
 Only a `202` JSON receipt with `status: received`, matching `transcript_hash`
 and `policy_validated: false` removes an envelope and records the receipt
 locally. A generic 2xx, wrong hash, redirect or invalid body cannot clear it.

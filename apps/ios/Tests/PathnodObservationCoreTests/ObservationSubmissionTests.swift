@@ -122,6 +122,54 @@ final class ObservationSubmissionTests: XCTestCase {
         do { _ = try await queue.drain(client: rejected, now: Date().addingTimeInterval(10)); XCTFail() } catch {}
         XCTAssertEqual(try queue.entries().first?.rejected, true)
     }
+    @MainActor func testBackoffPreservesAssertionOrderAcrossRestart() async throws {
+        let (_, credential, path, firstTranscript) = try input()
+        var secondTranscript = firstTranscript
+        secondTranscript.observationTimeMilliseconds += 1
+        // Framing-only envelopes; these bytes model increasing assertion counters,
+        // not genuine App Attest assertions or Groth16 proofs.
+        func envelope(_ transcript: ObservationTranscript, counter: UInt8) throws -> ObservationEnvelope {
+            let witness = try ObservationWitness(transcript: transcript, credential: credential, enrollment: path)
+            return try ObservationEnvelope(transcript: transcript.encode(), assertion: Data([counter]), keyID: "synthetic-key",
+                zk: ObservationZK(proof: testProof(), publicInputs: witness.publicInputs))
+        }
+        let first = try envelope(firstTranscript, counter: 1), second = try envelope(secondTranscript, counter: 2)
+        XCTAssertNotEqual(try first.hashHex(), try second.hashHex())
+        let dir = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let file = dir.appending(path: "outbox.json")
+        let base = URL(string: "https://verifier.example")!, endpoint = base.appending(path: "observations")
+        let queue = ObservationOutbox(url: file)
+        try queue.enqueue(first, endpoint: endpoint); try queue.enqueue(second, endpoint: endpoint)
+        let now = Date(timeIntervalSince1970: 1_000)
+        var failedBody: Data?
+        let failing = try ObservationHTTPClient(baseURL: base) { request in
+            failedBody = request.httpBody; throw URLError(.notConnectedToInternet)
+        }
+        do { _ = try await queue.drain(client: failing, now: now); XCTFail("send should fail") }
+        catch { XCTAssertEqual((error as? URLError)?.code, .notConnectedToInternet) }
+        let restored = ObservationOutbox(url: file)
+        XCTAssertEqual(try restored.entries().map(\.attempts), [1, 0])
+        var sent: [Data] = [], lastCounter: UInt8 = 0
+        let accepting = try ObservationHTTPClient(baseURL: base) { request in
+            let body = try XCTUnwrap(request.httpBody)
+            let entry = try JSONDecoder().decode(ObservationEnvelope.self, from: body)
+            let counter = try XCTUnwrap(Data(base64Encoded: entry.assertion)?.first)
+            XCTAssertGreaterThan(counter, lastCounter)
+            lastCounter = counter; sent.append(body)
+            return (try JSONEncoder().encode(ObservationReceipt(hash: entry.hashHex())),
+                HTTPURLResponse(url: endpoint, statusCode: 202, httpVersion: nil, headerFields: nil)!)
+        }
+        let early = try await restored.drain(client: accepting, now: now)
+        XCTAssertEqual(early, 0); XCTAssertTrue(sent.isEmpty)
+        XCTAssertEqual(try restored.entries().count, 2)
+        let recovered = try await restored.drain(client: accepting, now: now.addingTimeInterval(2))
+        XCTAssertEqual(recovered, 2); XCTAssertEqual(sent.count, 2)
+        XCTAssertEqual(sent.first, failedBody)
+        XCTAssertEqual(try sent.map { try JSONDecoder().decode(ObservationEnvelope.self, from: $0) }, [first, second])
+        XCTAssertTrue(try ObservationOutbox(url: file).entries().isEmpty)
+    }
+
     @MainActor func testInvalidURLsAndCorruptQueueFailClosed() throws {
         for text in ["http://evil.example", "https://u:p@verifier.example", "https://verifier.example?x=1", "https://verifier.example#x"] {
             XCTAssertThrowsError(try ObservationHTTPClient(baseURL: URL(string: text)!, allowLocalHTTP: true))
