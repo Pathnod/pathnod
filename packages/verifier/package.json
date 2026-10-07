@@ -29,7 +29,8 @@
     "enrollment:serve": "node dist/enrollment-http.js",
     "roots:verify": "node scripts/dev28-roots.ts",
     "eligibility:verify": "node scripts/dev29-eligibility.ts",
-    "observations:verify": "node scripts/dev35-submit.ts"
+    "observations:verify": "node scripts/dev35-submit.ts",
+    "demo": "node scripts/dev37-demo.ts"
   },
   "dependencies": {
     "@pathnod/solana": "workspace:*",
