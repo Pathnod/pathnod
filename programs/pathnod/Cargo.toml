@@ -23,3 +23,8 @@ anchor-spl = { version = "=1.2.0", default-features = false, features = ["token"
 groth16-solana = "=0.2.0"
 solana-define-syscall = "=5.2.0"
 solana-sha256-hasher = { version = "=3.1.0", features = ["sha2"] }
+solana-instructions-sysvar = "=3.0.1"
+solana-poseidon = "=5.0.0"
+
+[dev-dependencies]
+serde_json = "1"

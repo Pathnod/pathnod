@@ -1327,7 +1327,10 @@ dependencies = [
  "anchor-lang",
  "anchor-spl",
  "groth16-solana",
+ "serde_json",
  "solana-define-syscall 5.2.0",
+ "solana-instructions-sysvar",
+ "solana-poseidon",
  "solana-sha256-hasher",
 ]
 
@@ -1981,6 +1984,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "889194d8c5faec648f2f6fadddb60566249921ebb074e2707e7095458d5864e2"
 dependencies = [
  "bytemuck",
+]
+
+[[package]]
+name = "solana-poseidon"
+version = "5.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "854d28fdcdc6b8442684bb06826d82ea5da945ffa7202a6aea95e5fca0ac5a94"
+dependencies = [
+ "ark-bn254 0.5.0",
+ "light-poseidon",
+ "solana-define-syscall 5.2.0",
+ "thiserror 2.0.20",
 ]
 
 [[package]]

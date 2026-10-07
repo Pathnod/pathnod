@@ -4,10 +4,12 @@ import { fork } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import type { ObservationEnvelope } from "./observation-inbox.ts";
 import type { ObservationProofVerifier } from "./observation-policy.ts";
+import { verificationKeyDigest } from "@pathnod/solana";
 
 /** Pin a trusted circuit VK, NOT a key supplied by the observation. No prover artifacts needed. */
 export class PinnedGroth16Verifier implements ObservationProofVerifier {
   readonly digest: string;
+  readonly keyDigest: string;
   readonly #key: unknown;
   constructor(path: string, expectedSHA256: string) {
     if (!/^[a-f0-9]{64}$/.test(expectedSHA256) || statSync(path).size > 64 * 1024) throw Error("Invalid VK configuration");
@@ -21,6 +23,7 @@ export class PinnedGroth16Verifier implements ObservationProofVerifier {
       throw Error("Expected trusted DEV-13 seven-input BN254 Groth16 verification key");
     }
     this.#key = key;
+    this.keyDigest = verificationKeyDigest(key);
   }
   async verify(envelope: ObservationEnvelope): Promise<boolean> {
     return new Promise((resolve, reject) => {

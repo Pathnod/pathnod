@@ -190,14 +190,20 @@ export function decodeEnrollment(data: Uint8Array) {
 }
 
 export function decodeDeviceEpoch(data: Uint8Array) {
-  const r = new Reader(data, "DeviceEpoch", 75);
+  const length = data.length === 587 ? 587 : 75;
+  const r = new Reader(data, "DeviceEpoch", length);
   const result = {
     independentObservers: r.u16(), paidSlotsUsed: r.u8(),
     observationRoot: r.bytes(32), confidenceCommitment: r.bytes(32),
   };
+  const frontier = length === 587 ? Array.from({ length: 16 }, () => r.bytes(32)) : undefined;
   r.finish();
-  return result;
+  return { ...result, frontier };
 }
+
+export {OBSERVATION_COMMITMENT_SIZE,DEVICE_EPOCH_SIZE,OBSERVATION_TREE_DEPTH,DEFAULT_OBSERVATION_KEY_DIGEST,
+  observationAddresses,initializeObservationVerifier,submitObservation,decodeObservationVerifier,decodeObservationCommitment,
+  observationTreeLeaf,observationTreeNode,appendObservationTree,verificationKeyDigest} from './observation.js';
 
 export function activeRoots(state: ReturnType<typeof decodeEnrollment>): Buffer[] {
   const count = Number(state.publications < 4n ? state.publications : 4n);

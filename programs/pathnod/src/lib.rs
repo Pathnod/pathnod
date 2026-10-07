@@ -11,6 +11,9 @@ mod registry;
 pub use registry::*;
 mod authorization;
 pub use authorization::observation_authorization_digest;
+mod observation;
+mod trusted_vk;
+pub use observation::*;
 
 declare_id!("5V9pXQN5dQkRBSTsaezBg6qLRC3mbLj21Ny3j7xtuHTd");
 
@@ -75,8 +78,8 @@ pub mod pathnod {
     }
 
     /// DEV-16: prove once per nullifier with a caller-selected test key.
-    pub fn submit_observation(
-        ctx: Context<SubmitObservation>,
+    pub fn submit_observation_spike(
+        ctx: Context<SubmitObservationSpike>,
         nullifier: [u8; 32],
         public_inputs: [[u8; 32]; 7],
         proof_a: [u8; 64],
@@ -105,6 +108,19 @@ pub mod pathnod {
         commitment.accepted_slot = Clock::get()?.slot;
         Ok(())
     }
+
+    pub fn initialize_observation_verifier(
+        ctx: Context<InitializeObservationVerifier>,
+    ) -> Result<()> {
+        observation::handle_initialize_verifier(ctx)
+    }
+
+    pub fn submit_observation(
+        ctx: Context<SubmitObservation>,
+        args: SubmitObservationArgs,
+    ) -> Result<()> {
+        observation::handle_submit(ctx, args)
+    }
 }
 
 #[derive(Accounts)]
@@ -126,7 +142,7 @@ pub struct Groth16SpikeConfig {
 }
 
 #[account]
-pub struct ObservationCommitment {
+pub struct SpikeObservationCommitment {
     pub accepted: bool,
     pub nullifier: [u8; 32],
     pub public_inputs: [[u8; 32]; 7],
@@ -135,7 +151,7 @@ pub struct ObservationCommitment {
     pub accepted_slot: u64,
 }
 
-impl ObservationCommitment {
+impl SpikeObservationCommitment {
     pub const SPACE: usize = 8 + 1 + 32 + 7 * 32 + 32 + 32 + 8;
 }
 
@@ -157,12 +173,12 @@ pub struct VerifyGroth16Spike<'info> {
 
 #[derive(Accounts)]
 #[instruction(nullifier: [u8; 32])]
-pub struct SubmitObservation<'info> {
+pub struct SubmitObservationSpike<'info> {
     #[account(seeds = [b"dev15-vk", config.authority.as_ref()], bump)]
     pub config: Account<'info, Groth16SpikeConfig>,
-    #[account(init_if_needed, payer = submitter, space = ObservationCommitment::SPACE,
-        seeds = [b"obs", nullifier.as_ref()], bump)]
-    pub commitment: Account<'info, ObservationCommitment>,
+    #[account(init_if_needed, payer = submitter, space = SpikeObservationCommitment::SPACE,
+        seeds = [b"dev16-obs", nullifier.as_ref()], bump)]
+    pub commitment: Account<'info, SpikeObservationCommitment>,
     #[account(mut)]
     pub submitter: Signer<'info>,
     pub system_program: Program<'info, System>,
@@ -198,6 +214,14 @@ pub enum PathnodError {
     InvalidAuthority,
     #[msg("Root publication counter overflow")]
     PublicationOverflow,
+    #[msg("Missing or mismatched preceding verifier authorization")]
+    InvalidVerifierAuthorization,
+    #[msg("Observation proof does not match its registered scope")]
+    ObservationBindingMismatch,
+    #[msg("Device epoch has reached its observer capacity")]
+    ObserverCountOverflow,
+    #[msg("Observation epoch is outside the protocol freshness window")]
+    InvalidObservationEpoch,
 }
 
 fn verify_proof(

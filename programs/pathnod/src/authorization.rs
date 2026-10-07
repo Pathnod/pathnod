@@ -29,6 +29,36 @@ pub fn observation_authorization_digest(
     .to_bytes())
 }
 
+pub fn observation_authorization_with_evidence_digest(
+    transcript_hash: &[u8; 32],
+    evidence_hash: &[u8; 32],
+    nullifier: &[u8; 32],
+    pseudonym: &[u8; 32],
+    class: u8,
+    policy_version: u32,
+) -> Result<[u8; 32]> {
+    if *evidence_hash == [0; 32] {
+        return observation_authorization_digest(
+            transcript_hash,
+            nullifier,
+            pseudonym,
+            class,
+            policy_version,
+        );
+    }
+    observation_authorization_digest(transcript_hash, nullifier, pseudonym, class, policy_version)?;
+    Ok(hashv(&[
+        b"Pathnod/verified/v1",
+        transcript_hash,
+        evidence_hash,
+        nullifier,
+        pseudonym,
+        &[class],
+        &policy_version.to_le_bytes(),
+    ])
+    .to_bytes())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
