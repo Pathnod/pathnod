@@ -13,6 +13,6 @@
     "test": "node --test tests/*.test.ts",
     "registry:verify": "node scripts/dev27-registry.ts"
   },
-  "dependencies": { "@solana/web3.js": "1.98.4" },
+  "dependencies": { "@solana/web3.js": "1.99.0" },
   "devDependencies": { "@types/node": "24.13.6", "typescript": "5.9.3" }
 }
