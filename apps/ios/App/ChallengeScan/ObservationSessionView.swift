@@ -234,7 +234,10 @@ private final class ObservationSubmissionModel: ObservableObject {
             let transcript = try ObservationTranscript(capture: capture, credential: credential, enrollment: enrollment)
             let hash = try transcript.transcriptHash().hexString
             if try queue.wasReceived(hash: hash, endpoint: http.endpoint) {
-                status = "This observation was already received. Not policy-validated or paid."; return
+                status = try queue.wasValidated(hash: hash, endpoint: http.endpoint)
+                    ? "This observation was already policy-validated. Not submitted on-chain or paid."
+                    : "This observation was already received by the development sink. Not policy-validated or paid."
+                return
             }
             status = "Proving and signing the original transcript…"
             let envelope = try await ObservationSubmission.prepare(capture: capture, credential: credential, enrollment: enrollment,
@@ -243,7 +246,11 @@ private final class ObservationSubmissionModel: ObservableObject {
             try queue.enqueue(envelope, endpoint: http.endpoint)
             status = "Queued locally. Sending…"
             let received = try await queue.drain(client: http)
-            status = received > 0 ? "Received by development verifier. Not policy-validated or paid." : "Queued; waiting for retry."
+            if received > 0 {
+                status = try queue.wasValidated(hash: hash, endpoint: http.endpoint)
+                    ? "Policy-validated by the verifier. Not submitted on-chain or paid."
+                    : "Received by development verifier. Not policy-validated or paid."
+            } else { status = "Queued; waiting for retry." }
             #endif
         } catch ObservationSubmissionError.proverUnavailable {
             status = "Mopro is not bundled in this build. Use the DEV-32 Mopro build; no fake proof or assertion was sent."
@@ -255,7 +262,7 @@ private final class ObservationSubmissionModel: ObservableObject {
             let queue = try outbox()
             guard try !queue.entries().isEmpty else { return }
             let count = try await queue.drain(client: client(serverURL))
-            if count > 0 { status = "\(count) observation(s) received. Not policy-validated or paid." }
+            if count > 0 { status = "\(count) receipt(s) confirmed. Validation status is stored per observation; no on-chain submission or payment." }
         } catch { status = "Retry not confirmed; envelope retained locally: \(error.localizedDescription)" }
     }
 }

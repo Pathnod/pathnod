@@ -14,6 +14,11 @@ export {
 export type { ObservationTranscript, TranscriptChallenge, TranscriptLocalSignals } from "./observation-transcript.ts";
 export { parseObservationEnvelope, ObservationInboxError } from "./observation-inbox.ts";
 export type { ObservationEnvelope, ObservationReceipt } from "./observation-inbox.ts";
+export { ObservationPolicyService, ObservationPolicyError } from "./observation-policy.ts";
+export type { ObservationPolicyCode, ObservationPolicySource, ObservationProofVerifier, ValidatedObservationReceipt } from "./observation-policy.ts";
+export { SolanaObservationPolicySource } from "./observation-solana.ts";
+export type { ObservationAccountReader } from "./observation-solana.ts";
+export { PinnedGroth16Verifier } from "./observation-groth16.ts";
 export type { AppAttestChallengePurpose, IssuedAppAttestChallenge, IssuedAppAttestTrial } from "./app-attest-gate.ts";
 
 export { AppAttestVerifier, AppAttestVerificationError } from "./app-attest.ts";

@@ -112,11 +112,18 @@ a newer assertion through one alias may invalidate an older assertion queued
 under another. Keep a stable canonical service URL; drain pending observations
 before migrating an existing verifier to a new URL.
 
-Only a `202` JSON receipt with `status: received`, matching `transcript_hash`
+In the original DEV-32 implementation, only a `202` JSON receipt with
+`status: received`, matching `transcript_hash`
 and `policy_validated: false` removes an envelope and records the receipt
 locally. A generic 2xx, wrong hash, redirect or invalid body cannot clear it.
 After confirmation, the last 1,024 endpoint/hash receipts prevent repeated
 queueing of the same observation. This is not a payment receipt.
+
+DEV-33 extends this contract with a matching `status: validated` /
+`policy_validated: true` pair and persists validation separately from reception.
+The original development sink still returns only `received/false`.
+See [DEV-33 policy](dev33-observation-policy.md) for production configuration,
+rejection codes and the remaining real-iPhone integration check.
 
 ## Development receiver
 

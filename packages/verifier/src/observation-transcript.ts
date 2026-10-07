@@ -52,7 +52,8 @@ function field(value: Uint8Array): void {
 }
 
 /** Structural validation only. Signature, freshness and root policy remain DEV-33. */
-export function validateObservationTranscript(value: ObservationTranscript): void {
+export function validateObservationTranscript(value: ObservationTranscript, minimumRSSISamples = 5): void {
+  integer(minimumRSSISamples, 0, 5);
   if (value.version !== 0) fail();
   for (const part of [value.protocolID, value.deviceID, value.publicKey, value.evidenceHash]) bytes(part, 32);
   if (value.protocolID.every(byte => byte === 0)) fail();
@@ -73,7 +74,7 @@ export function validateObservationTranscript(value: ObservationTranscript): voi
   if (!geo.every(byte => byte === 0) && !geo.every(byte => Buffer.from("0123456789bcdefghjkmnpqrstuvwxyz").includes(byte))) fail();
   bytes(local.wifiBSSIDHash, 32); integer(local.gpsAccuracyMeters, 0, 0xffff);
   integer(local.barometerHPATimes10, 0, 0xffff); integer(local.motionClass, 0, 3);
-  if (local.rssiSamples.length < 5 || local.rssiSamples.length > 20) fail();
+  if (local.rssiSamples.length < minimumRSSISamples || local.rssiSamples.length > 20) fail();
   for (const rssi of local.rssiSamples) integer(rssi, -127, 0);
 }
 
@@ -100,8 +101,9 @@ export function encodeObservationTranscript(value: ObservationTranscript): Buffe
   return Buffer.concat(parts);
 }
 
-export function decodeObservationTranscript(input: Uint8Array): ObservationTranscript {
-  if (!(input instanceof Uint8Array) || input.length < 596 || input.length > 611) fail();
+export function decodeObservationTranscript(input: Uint8Array, minimumRSSISamples = 5): ObservationTranscript {
+  integer(minimumRSSISamples, 0, 5);
+  if (!(input instanceof Uint8Array) || input.length < 591 + minimumRSSISamples || input.length > 611) fail();
   const data = Buffer.from(input); let offset = 0;
   const raw = (size: number): Buffer => {
     if (size > data.length - offset) fail();
@@ -124,12 +126,12 @@ export function decodeObservationTranscript(input: Uint8Array): ObservationTrans
   const local: TranscriptLocalSignals = { geohash6: raw(6), gpsAccuracyMeters: num(2), barometerHPATimes10: num(2),
     motionClass: num(1), wifiBSSIDHash: raw(32), rssiSamples: [] };
   const count = num(4);
-  if (count < 5 || count > 20) fail();
+  if (count < minimumRSSISamples || count > 20) fail();
   for (let index = 0; index < count; index++) local.rssiSamples.push(rssi());
   const value: ObservationTranscript = { version: 0, protocolID, deviceID, publicKey, curve, epoch,
     observationTimeMilliseconds, challenges, local, evidenceHash: raw(32), pseudonym: raw(32), nullifier: raw(32), observerClass: num(1) };
   if (offset !== data.length) fail();
-  validateObservationTranscript(value); return value;
+  validateObservationTranscript(value, minimumRSSISamples); return value;
 }
 
 export function observationTranscriptHash(value: ObservationTranscript): Buffer {

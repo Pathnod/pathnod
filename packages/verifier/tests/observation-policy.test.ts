@@ -1,0 +1,265 @@
+import assert from "node:assert/strict";
+import { createHash, generateKeyPairSync, randomBytes, sign } from "node:crypto";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+import { DatabaseSync } from "node:sqlite";
+import { test } from "node:test";
+import { AppAttestGate } from "../src/app-attest-gate.ts";
+import { ObserverEnrollmentService } from "../src/observer-enrollment.ts";
+import { ObservationPolicyService, ObservationPolicyError, type ObservationPolicySource } from "../src/observation-policy.ts";
+import { decodeObservationTranscript, encodeObservationTranscript, type ObservationTranscript } from "../src/observation-transcript.ts";
+import type { ObservationEnvelope } from "../src/observation-inbox.ts";
+import { PinnedGroth16Verifier } from "../src/observation-groth16.ts";
+import { createEnrollmentServer } from "../src/enrollment-http.ts";
+import { PublicKey } from "@solana/web3.js";
+import { SolanaObservationPolicySource } from "../src/observation-solana.ts";
+
+const vector = JSON.parse(readFileSync(new URL("../../../fixtures/observations/transcript-v0.json", import.meta.url), "utf8")).vectors[0];
+const policy = { appID: "U5MCCC24G5.xyz.pathnod.appattestspike", environment: "development", allowedValidationCategories: [3], allowedBundleVersions: [] } as const;
+const digest = (...values: Uint8Array[]) => { const h = createHash("sha256"); for (const v of values) h.update(v); return h.digest(); };
+function head(major: number, size: number): Buffer {
+  if (size < 24) return Buffer.from([major << 5 | size]);
+  if (size < 256) return Buffer.from([major << 5 | 24, size]);
+  const b = Buffer.alloc(3); b[0] = major << 5 | 25; b.writeUInt16BE(size, 1); return b;
+}
+function cbor(value: string | Buffer | Map<string, Buffer>): Buffer {
+  if (typeof value === "string") { const b = Buffer.from(value); return Buffer.concat([head(3, b.length), b]); }
+  if (Buffer.isBuffer(value)) return Buffer.concat([head(2, value.length), value]);
+  return Buffer.concat([head(5, value.size), ...[...value].flatMap(([key, v]) => [cbor(key), cbor(v)])]);
+}
+async function fixture(capacity = 100) {
+  const dir = mkdtempSync(join(tmpdir(), "pathnod-dev33-")), path = join(dir, "enrollment.sqlite");
+  const gate = new AppAttestGate(path, policy);
+  const enrollment = await ObserverEnrollmentService.open(path, gate);
+  const db = new DatabaseSync(path), keyID = randomBytes(32).toString("base64");
+  const key = generateKeyPairSync("ec", { namedCurve: "prime256v1" });
+  // Explicit synthetic enrolled fixture; Apple certificate attestation is tested separately, never bypassed in runtime.
+  db.prepare("INSERT INTO app_attest_keys VALUES (?, ?, ?, 'development', 0, NULL, NULL)")
+    .run(keyID, key.publicKey.export({ format: "pem", type: "spki" }).toString(), policy.appID);
+  db.prepare("INSERT INTO observer_enrollments VALUES (?, ?, 1, 0, ?)").run(keyID, vector.enrollment.commitment, vector.enrollment.leaf);
+  const t = decodeObservationTranscript(Buffer.from(vector.bytes.slice(2), "hex"));
+  let now = Number(t.observationTimeMilliseconds), proofValid = true, unavailable = false, proofCalls = 0;
+  const snapshot = { device: { key: t.publicKey, curve: 1, capabilities: 2 }, epochSeconds: 60,
+    minimumRSSI: -90, roots: [BigInt(vector.enrollment.root).toString()], nullifierUsed: false };
+  const source: ObservationPolicySource = { target: "test-only/dev33", snapshot: async () => {
+    if (unavailable) throw Error("test RPC unavailable"); return snapshot;
+  } };
+  const proof = { verify: async () => { proofCalls++; return proofValid; } };
+  let service = new ObservationPolicyService(path, policy, source, proof, { clock: () => now, capacity });
+  function assertion(bytes: Buffer, assertionCounter = 1): string {
+    const hash = createHash("sha256").update("Pathnod/transcript/v0").update(bytes).digest();
+    const counter = Buffer.alloc(4); counter.writeUInt32BE(assertionCounter);
+    const auth = Buffer.concat([digest(Buffer.from(policy.appID)), Buffer.from([0]), counter]);
+    return cbor(new Map([["signature", sign("sha256", digest(auth, hash), key.privateKey)], ["authenticatorData", auth]])).toString("base64");
+  }
+  function envelope(transcript: ObservationTranscript = t, assertionCounter = 1): ObservationEnvelope {
+    const bytes = encodeObservationTranscript(transcript);
+    return { transcript: bytes.toString("base64"), assertion: assertion(bytes, assertionCounter), key_id: keyID,
+      zk: { proof: { pi_a: ["1", "2", "1"], pi_b: [["3", "4"], ["5", "6"], ["1", "0"]], pi_c: ["7", "8", "1"], protocol: "groth16", curve: "bn128" },
+        public: [snapshot.roots[0]!, BigInt(vector.protocolField).toString(), BigInt(vector.deviceField).toString(), String(transcript.epoch),
+          BigInt("0x" + Buffer.from(transcript.nullifier).toString("hex")).toString(),
+          BigInt("0x" + Buffer.from(transcript.pseudonym).toString("hex")).toString(), String(transcript.observerClass)] } };
+  }
+  return { dir, path, db, gate, enrollment, t, keyID, snapshot, envelope, assertion,
+    get service() { return service; }, get proofCalls() { return proofCalls; },
+    setNow: (n: number) => { now = n; }, setProof: (v: boolean) => { proofValid = v; }, setUnavailable: () => { unavailable = true; },
+    restart: () => { service.close(); service = new ObservationPolicyService(path, policy, source, proof, { clock: () => now, capacity }); },
+    close: () => { service.close(); db.close(); enrollment.close(); gate.close(); rmSync(dir, { recursive: true, force: true }); } };
+}
+async function code(expected: string, action: Promise<unknown>) {
+  await assert.rejects(action, (error: unknown) => error instanceof ObservationPolicyError && error.code === expected);
+}
+
+test("DEV-33: all nine rejection codes, genuine Ed25519/P256 signatures, no mutation on failure", async () => {
+  const cases: [string, (f: Awaited<ReturnType<typeof fixture>>, e: ObservationEnvelope) => void][] = [
+    ["E_DEVICE_UNKNOWN", f => { f.snapshot.device.key = Buffer.alloc(32); }],
+    ["E_DEV_SIG", (f, e) => { const t = structuredClone(f.t); t.challenges[1]!.signature[0] = t.challenges[1]!.signature[0]! ^ 1; Object.assign(e, f.envelope(t)); }],
+    ["E_DEV_COUNTER", (f, e) => { f.db.prepare("INSERT INTO observation_device_counters_v0 VALUES (?, 1)").run(Buffer.from(f.t.deviceID).toString("hex")); }],
+    ["E_RTT", (f, e) => { const t = structuredClone(f.t); t.challenges.forEach(c => { c.roundTripMilliseconds = 401; }); Object.assign(e, f.envelope(t)); }],
+    ["E_EPOCH", f => { f.setNow(Number(f.t.observationTimeMilliseconds) + 600_001); }],
+    ["E_ASSERTION", (_, e) => { e.assertion = "Kg=="; }],
+    ["E_ZK", f => { f.setProof(false); }],
+    ["E_NULLIFIER", f => { f.snapshot.nullifierUsed = true; }],
+    ["E_RSSI", (f, e) => { const t = structuredClone(f.t); t.local.rssiSamples.fill(-91); Object.assign(e, f.envelope(t)); }],
+  ];
+  for (const [expected, alter] of cases) {
+    const f = await fixture();
+    try {
+      const e = f.envelope(); alter(f, e); await code(expected, f.service.receive(e));
+      assert.equal(f.gate.getKey(f.keyID)!.counter, 0);
+      assert.equal(f.db.prepare("SELECT COUNT(*) AS n FROM observation_validations_v0").get()!.n, 0);
+    } finally { f.close(); }
+  }
+});
+test("DEV-33: accepted boundaries, durable idempotence and simultaneous identical retries", async () => {
+  const f = await fixture();
+  try {
+    f.t.challenges.forEach(c => { c.roundTripMilliseconds = 400; }); f.t.local.rssiSamples.fill(-90);
+    f.setNow(Number(f.t.observationTimeMilliseconds) + 600_000);
+    const e = f.envelope(), receipts = await Promise.all([f.service.receive(e), f.service.receive(e)]);
+    assert.deepEqual(receipts[0], receipts[1]); assert.equal(receipts[0]!.policy_validated, true);
+    assert.equal(f.gate.getKey(f.keyID)!.counter, 1);
+    f.restart(); f.setUnavailable();
+    assert.deepEqual(await f.service.receive(e), receipts[0]);
+    await code("E_NULLIFIER", f.service.receive({ ...e, assertion: "Kg==" }));
+    const disk = readFileSync(f.path);
+    assert.ok(!disk.includes(Buffer.from(e.transcript))); assert.ok(!disk.includes(Buffer.from(e.assertion)));
+  } finally { f.close(); }
+});
+test("DEV-33: epoch arithmetic, both freshness boundaries, unknown/revoked/class keys and root/public binding", async () => {
+  const f = await fixture();
+  try {
+    f.setNow(Number(f.t.observationTimeMilliseconds) - 600_000);
+    const e = f.envelope();
+    f.snapshot.epochSeconds = 61; await code("E_EPOCH", f.service.receive(e)); f.snapshot.epochSeconds = 60;
+    f.setNow(Number(f.t.observationTimeMilliseconds) - 600_001); await code("E_EPOCH", f.service.receive(e));
+    f.setNow(Number(f.t.observationTimeMilliseconds));
+    await code("E_ASSERTION", f.service.receive({ ...e, key_id: "unknown" }));
+    const otherClass = structuredClone(f.t); otherClass.observerClass = 2;
+    await code("E_ASSERTION", f.service.receive(f.envelope(otherClass)));
+    f.snapshot.roots = []; await code("E_ZK", f.service.receive(e)); f.snapshot.roots = [e.zk.public[0]!];
+    for (let i = 1; i < 7; i++) {
+      const bad = structuredClone(e); bad.zk.public[i] = "0"; await code("E_ZK", f.service.receive(bad));
+    }
+    f.service.revoke(f.keyID); await code("E_ASSERTION", f.service.receive(e));
+  } finally { f.close(); }
+});
+test("DEV-33: retryable dependency failures, counter capability, capacity rollback and cross-target refusal", async () => {
+  const f = await fixture(1);
+  try {
+    f.snapshot.device.capabilities = 0;
+    f.db.prepare("INSERT INTO observation_device_counters_v0 VALUES (?, 999)").run(Buffer.from(f.t.deviceID).toString("hex"));
+    await f.service.receive(f.envelope());
+    const t = structuredClone(f.t); t.nullifier = Buffer.alloc(32, 1);
+    await code("observation_capacity", f.service.receive(f.envelope(t, 2)));
+    assert.equal(f.gate.getKey(f.keyID)!.counter, 1);
+    f.setUnavailable(); await code("observation_dependency_unavailable", f.service.receive(f.envelope(t, 2)));
+    assert.throws(() => new ObservationPolicyService(f.path, policy,
+      { target: "different-chain", snapshot: async () => f.snapshot }, { verify: async () => true }), /another chain/);
+  } finally { f.close(); }
+});
+test("DEV-33: short RSSI arrays yield E_RSSI rather than a generic framing rejection", async () => {
+  const f = await fixture();
+  try {
+    const e = f.envelope(), bytes = Buffer.from(e.transcript, "base64");
+    bytes.writeUInt32LE(4, 490); const short = Buffer.concat([bytes.subarray(0, 494), bytes.subarray(495)]);
+    e.transcript = short.toString("base64");
+    e.assertion = f.assertion(short);
+    const decoded = decodeObservationTranscript(short, 0); assert.equal(decoded.local.rssiSamples.length, 4);
+    const { parseObservationEnvelope } = await import("../src/observation-inbox.ts");
+    assert.equal((await parseObservationEnvelope(e, true)).publicInputsMatch, true);
+    await code("E_RSSI", f.service.receive(e));
+  } finally { f.close(); }
+});
+test("DEV-33: HTTP validated contract and stable 422/503 rejections", async () => {
+  const f = await fixture(), server = createEnrollmentServer(f.enrollment, undefined, undefined, undefined, f.service);
+  try {
+    await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address(); assert.ok(address && typeof address !== "string");
+    const post = (e: unknown) => fetch(`http://127.0.0.1:${address.port}/observations`,
+      { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(e) });
+    const e = f.envelope(); const bad = await post({ ...e, assertion: "Kg==" });
+    assert.equal(bad.status, 422); assert.deepEqual(await bad.json(), { error: "E_ASSERTION" });
+    const good = await post(e); assert.equal(good.status, 202); assert.equal((await good.json() as { status: string }).status, "validated");
+    f.setUnavailable(); const t = structuredClone(f.t); t.nullifier = Buffer.alloc(32, 1);
+    assert.equal((await post(f.envelope(t, 2))).status, 503);
+  } finally { await new Promise<void>(resolve => server.close(() => resolve())); f.close(); }
+});
+test("DEV-33: unsupported protocol is permanent without RPC or mutation; chain failures remain retryable", async () => {
+  const f = await fixture();
+  const program = new PublicKey("5V9pXQN5dQkRBSTsaezBg6qLRC3mbLj21Ny3j7xtuHTd");
+  let rpcCalls = 0, outage = true;
+  const reader = { read: async () => {
+    rpcCalls++;
+    if (outage) throw Error("test RPC outage");
+    return [null, null, null, null]; // Missing/untrusted state is not a permanent input rejection.
+  } };
+  const unsupportedProtocol = Buffer.from(f.t.protocolID);
+  unsupportedProtocol[0] = unsupportedProtocol[0]! ^ 1;
+  let source = new SolanaObservationPolicySource(reader, program, unsupportedProtocol, "test-only");
+  const checked = new ObservationPolicyService(f.path, policy,
+    { target: "test-only/dev33", snapshot: t => source.snapshot(t) },
+    { verify: async () => { assert.fail("rejected input must not reach proof verification"); } },
+    { clock: () => Number(f.t.observationTimeMilliseconds) });
+  const server = createEnrollmentServer(f.enrollment, undefined, undefined, undefined, checked);
+  const unchanged = () => {
+    assert.equal(f.gate.getKey(f.keyID)!.counter, 0);
+    assert.equal(f.db.prepare("SELECT COUNT(*) AS n FROM observation_device_counters_v0").get()!.n, 0);
+    assert.equal(f.db.prepare("SELECT COUNT(*) AS n FROM observation_validations_v0").get()!.n, 0);
+  };
+  try {
+    await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address(); assert.ok(address && typeof address !== "string");
+    const envelope = f.envelope();
+    const post = () => fetch(`http://127.0.0.1:${address.port}/observations`,
+      { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(envelope) });
+    // Use the real Solana source, not a mock throwing the expected policy error.
+    const unsupported = await post();
+    assert.equal(unsupported.status, 422);
+    assert.deepEqual(await unsupported.json(), { error: "E_DEVICE_UNKNOWN" });
+    assert.equal(rpcCalls, 0); unchanged();
+    source = new SolanaObservationPolicySource(reader, program, Buffer.from(f.t.protocolID), "test-only");
+    const unavailable = await post();
+    assert.equal(unavailable.status, 503);
+    assert.deepEqual(await unavailable.json(), { error: "observation_dependency_unavailable" });
+    assert.equal(rpcCalls, 1); unchanged();
+    outage = false;
+    const untrusted = await post();
+    assert.equal(untrusted.status, 503);
+    assert.deepEqual(await untrusted.json(), { error: "observation_dependency_unavailable" });
+    assert.equal(rpcCalls, 2); unchanged();
+  } finally {
+    await new Promise<void>(resolve => server.close(() => resolve())); checked.close(); f.close();
+  }
+});
+test("DEV-33: actual Mopro proof, pinned VK, and real device/test-observer signatures", async () => {
+  const f = await fixture();
+  try {
+    const vkPath = new URL("../../../fixtures/observations/dev33-verification-key.json", import.meta.url).pathname;
+    const vk = readFileSync(vkPath);
+    const proof = new PinnedGroth16Verifier(vkPath, createHash("sha256").update(vk).digest("hex"));
+    assert.throws(() => new PinnedGroth16Verifier(vkPath, "0".repeat(64)), /digest/);
+    const service = new ObservationPolicyService(f.path, policy, {
+      target: "test-only/dev33", snapshot: async () => f.snapshot,
+    }, proof, { clock: () => Number(f.t.observationTimeMilliseconds) });
+    try {
+      const e = f.envelope(); e.zk = JSON.parse(readFileSync(new URL("../../../fixtures/observations/dev33-proof.json", import.meta.url), "utf8"));
+      const bad = structuredClone(e); bad.zk.proof.pi_a[0] = "0";
+      await code("E_ZK", service.receive(bad));
+      assert.equal((await service.receive(e)).policy_validated, true);
+    } finally { service.close(); }
+  } finally { f.close(); }
+});
+
+test("DEV-33: counter CAS observes concurrent enrollment updates and revocation during proof", async () => {
+  for (const revoke of [false, true]) {
+    const f = await fixture();
+    try {
+      const service = new ObservationPolicyService(f.path, policy, { target: "test-only/dev33", snapshot: async () => f.snapshot },
+        { verify: async () => {
+          if (revoke) f.service.revoke(f.keyID);
+          else f.db.prepare("UPDATE app_attest_keys SET counter=1 WHERE key_id=?").run(f.keyID);
+          return true;
+        } }, { clock: () => Number(f.t.observationTimeMilliseconds) });
+      try { await code("E_ASSERTION", service.receive(f.envelope())); }
+      finally { service.close(); }
+      assert.equal(f.db.prepare("SELECT COUNT(*) AS n FROM observation_validations_v0").get()!.n, 0);
+      assert.equal(f.db.prepare("SELECT COUNT(*) AS n FROM observation_device_counters_v0").get()!.n, 0);
+    } finally { f.close(); }
+  }
+});
+test("DEV-33: dependency exception and freshness expiry during proof never consume counters", async () => {
+  for (const timeout of [false, true]) {
+    const f = await fixture();
+    try {
+      // Use a separate clock advanced by the verifier to exercise final acceptance, not only the early check.
+      let now = Number(f.t.observationTimeMilliseconds);
+      const checked = new ObservationPolicyService(f.path, policy, { target: "test-only/dev33", snapshot: async () => f.snapshot },
+        { verify: async () => { if (timeout) throw Error("proof unavailable"); now += 600_001; return true; } }, { clock: () => now });
+      try { await code(timeout ? "observation_dependency_unavailable" : "E_EPOCH", checked.receive(f.envelope())); }
+      finally { checked.close(); }
+      assert.equal(f.gate.getKey(f.keyID)!.counter, 0);
+    } finally { f.close(); }
+  }
+});

@@ -57,6 +57,8 @@ export interface VerifyAppAttestAssertionInput {
   readonly key: VerifiedAppAttestKey;
   readonly object: Uint8Array;
   readonly expectedChallenge: Uint8Array;
+  /** Observation assertions already receive the canonical transcript hash on iOS. */
+  readonly challengeIsClientDataHash?: boolean;
 }
 
 const APP_ATTEST_ROOT = new X509Certificate(
@@ -317,7 +319,7 @@ export class AppAttestVerifier {
     try {
       signatureValid = verify(
         "sha256",
-        digest(authData, digest(challenge)),
+        digest(authData, input.challengeIsClientDataHash ? challenge : digest(challenge)),
         input.key.publicKeyPem,
         signature,
       );
