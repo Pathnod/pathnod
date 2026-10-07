@@ -128,8 +128,10 @@ which is separate from the production cache. Logs, result bundles and signing
 artifacts must remain outside Git. The test's duration is reported, not asserted
 below five seconds after the owner's acceptance of the deviation.
 
-CI runs Swift package tests and an unsigned app build on macOS. Physical tests
-require the actual hardware and are not presented as hosted-CI coverage.
+CI runs Swift package tests, app tests on an available iPhone simulator, and an
+unsigned app build on macOS. The cancelled-preparation regression is included
+in the simulator run. Physical tests require the actual hardware and are not
+presented as hosted-CI coverage.
 
 ## Physical validation — 2026-10-06
 
