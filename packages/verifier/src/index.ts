@@ -12,6 +12,7 @@ export {
   validateObservationTranscript, observationTranscriptHash, observationEvidenceHash,
 } from "./observation-transcript.ts";
 export type { ObservationTranscript, TranscriptChallenge, TranscriptLocalSignals } from "./observation-transcript.ts";
+export { PathnodObservationSubmissionAdapter } from './observation-adapter.ts';
 export { parseObservationEnvelope, ObservationInboxError } from "./observation-inbox.ts";
 export type { ObservationEnvelope, ObservationReceipt } from "./observation-inbox.ts";
 export { ObservationPolicyService, ObservationPolicyError } from "./observation-policy.ts";

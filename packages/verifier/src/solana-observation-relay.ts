@@ -1,12 +1,12 @@
-import { Connection, Keypair, PublicKey, Transaction, type TransactionInstruction } from "@solana/web3.js";
+import { ComputeBudgetProgram, Connection, Keypair, PublicKey, Transaction, type TransactionInstruction } from "@solana/web3.js";
 import { activeRoots, decodeProtocol, decodeEnrollment, registryAddresses, UPGRADEABLE_LOADER } from "@pathnod/solana";
 import { authorizationInstruction, hex32 } from "./observation-authorization.ts";
 import type { ObservationRelayPayload, ObservationRelayTransport, PreparedObservationTransaction } from "./observation-relay.ts";
 
-/** DEV-35 must supply the actual instruction/account ABI and validate the resulting commitment.
- * Never substitute the caller-key DEV-16 spike for this adapter. */
 export interface ObservationSubmissionAdapter {
   readonly contract: string;
+  readonly computeUnitLimit?: number;
+  validateTarget?(connection: Connection, program: PublicKey): Promise<void>;
   instruction(program: PublicKey, payer: PublicKey, payload: ObservationRelayPayload): TransactionInstruction;
   confirm(connection: Connection, program: PublicKey, payload: ObservationRelayPayload): Promise<boolean>;
 }
@@ -42,6 +42,7 @@ export class SolanaObservationRelayTransport implements ObservationRelayTranspor
     if (await connection.getGenesisHash() !== genesis) throw Error("Unexpected relay cluster");
     const key = new PublicKey(program), account = await connection.getAccountInfo(key, "finalized");
     if (!account?.executable || !account.owner.equals(UPGRADEABLE_LOADER)) throw Error("Untrusted relay program");
+    await adapter.validateTarget?.(connection, key);
     return new SolanaObservationRelayTransport(connection, key, hex32(protocol), payer, adapter, genesis, verifier);
   }
   async eligible(payload: ObservationRelayPayload): Promise<boolean> {
@@ -64,8 +65,12 @@ export class SolanaObservationRelayTransport implements ObservationRelayTranspor
     const latest = await this.connection.getLatestBlockhash("finalized");
     const submit = this.adapter.instruction(this.program, this.payer.publicKey, payload);
     if (!submit.programId.equals(this.program)) throw Error("Adapter selected another program");
-    const tx = new Transaction({ feePayer: this.payer.publicKey, ...latest })
-      .add(authorizationInstruction(payload, payload.verifier, payload.verifierSignature), submit);
+    const tx = new Transaction({ feePayer: this.payer.publicKey, ...latest });
+    if (this.adapter.computeUnitLimit !== undefined) {
+      if (!Number.isInteger(this.adapter.computeUnitLimit) || this.adapter.computeUnitLimit < 1 || this.adapter.computeUnitLimit > 300_000) throw Error("Invalid observation compute budget");
+      tx.add(ComputeBudgetProgram.setComputeUnitLimit({ units: this.adapter.computeUnitLimit }));
+    }
+    tx.add(authorizationInstruction(payload, payload.verifier, payload.verifierSignature), submit);
     tx.sign(this.payer);
     const wire = tx.serialize(); if (wire.length > 1232 || !tx.signature) throw Error("Transaction size/signature invalid");
     return { wire: wire.toString("base64"), signature: signatureBase58(tx.signature), lastValidBlockHeight: latest.lastValidBlockHeight };
@@ -85,5 +90,8 @@ export class SolanaObservationRelayTransport implements ObservationRelayTranspor
   }
   async expired(transaction: PreparedObservationTransaction): Promise<boolean> {
     return await this.connection.getBlockHeight("finalized") > transaction.lastValidBlockHeight;
+  }
+  async confirmExisting(payload: ObservationRelayPayload): Promise<boolean> {
+    return this.adapter.confirm(this.connection, this.program, payload);
   }
 }

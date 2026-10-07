@@ -27,6 +27,8 @@ export interface ObservationRelayTransport {
   send(transaction: PreparedObservationTransaction): Promise<void>;
   inspect(transaction: PreparedObservationTransaction, payload: ObservationRelayPayload): Promise<"missing" | "pending" | "confirmed" | "failed">;
   expired(transaction: PreparedObservationTransaction): Promise<boolean>;
+  /** Finalized, fully matched commitment from another relay or a signature-history gap. */
+  confirmExisting?(payload: ObservationRelayPayload): Promise<boolean>;
 }
 export function initializeObservationRelay(db: DatabaseSync, target: string, verifier: string): void {
   db.exec(`CREATE TABLE IF NOT EXISTS observation_relay_target (id INTEGER PRIMARY KEY CHECK(id=1), target TEXT NOT NULL, verifier TEXT NOT NULL);
@@ -126,6 +128,7 @@ export class ObservationRelayer {
     if (transaction) {
       const state = await this.#transport.inspect(transaction, payload);
       if (state === "confirmed") { this.#db.prepare("UPDATE observation_relay_jobs SET status='confirmed', last_error=NULL WHERE nullifier=?").run(job.nullifier); return; }
+      if (await this.#confirmExisting(job, payload)) return;
       if (state === "failed") { this.#fail(job, "transaction_failed"); return; }
       if (state === "pending") { this.#retry(job); return; }
       if (await this.#transport.expired(transaction)) {
@@ -137,6 +140,7 @@ export class ObservationRelayer {
         transaction = undefined;
       }
     }
+    if (!transaction && await this.#confirmExisting(job, payload)) return;
     if (!await this.#transport.eligible(payload)) {
       // A changed account snapshot blocks another broadcast, but does not resolve
       // signed bytes already sent. Keep reconciling while their blockhash is valid.
@@ -159,6 +163,12 @@ export class ObservationRelayer {
   }
   #retry(job: Job): void {
     this.#db.prepare("UPDATE observation_relay_jobs SET retry_at=?, last_error=NULL WHERE nullifier=?").run(this.#now() + 2000, job.nullifier);
+  }
+  async #confirmExisting(job: Job, payload: ObservationRelayPayload): Promise<boolean> {
+    if (!this.#transport.confirmExisting || !await this.#transport.confirmExisting(payload)) return false;
+    // The matching account is authoritative; an unconfirmed/failed local signature is not its provenance.
+    this.#db.prepare("UPDATE observation_relay_jobs SET status='confirmed', signature=NULL, last_error=NULL WHERE nullifier=?").run(job.nullifier);
+    return true;
   }
   #fail(job: Job, code: string): void {
     this.#db.prepare("UPDATE observation_relay_jobs SET status='failed', last_error=? WHERE nullifier=?").run(code, job.nullifier);

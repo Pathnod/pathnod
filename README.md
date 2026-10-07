@@ -38,6 +38,9 @@ programs/pathnod/    Solana program
 docs/                architecture decisions and project notes
 ```
 
+DEV-35 adds trusted observation registration, a native commitment tree and the
+concrete durable relay adapter. See [the submission ABI and runbook](docs/dev35-submit-observation.md).
+
 ## Current status
 
 Pathnod is at an early development stage. The intended protocol above is not a

@@ -69,7 +69,7 @@ async function main(): Promise<void> {
   await writeFile(path.join(artifacts, "dev16-proof.bin"), proofBytes);
 
   const [config] = PublicKey.findProgramAddressSync([Buffer.from("dev15-vk"), wallet.publicKey.toBuffer()], program);
-  const commitmentFor = (seed: Buffer) => PublicKey.findProgramAddressSync([Buffer.from("obs"), seed], program)[0];
+  const commitmentFor = (seed: Buffer) => PublicKey.findProgramAddressSync([Buffer.from("dev16-obs"), seed], program)[0];
   const commitment = commitmentFor(nullifier);
   const instruction = (name: string, data: Buffer, keys: TransactionInstruction["keys"]) => new TransactionInstruction({
     programId: program, keys, data: Buffer.concat([discriminator("global", name), data]),
@@ -115,7 +115,7 @@ async function main(): Promise<void> {
 
   const submit = (data: Buffer, target: PublicKey, payer: PublicKey) => [
     ComputeBudgetProgram.setComputeUnitLimit({ units: 400_000 }),
-    instruction("submit_observation", data, [
+    instruction("submit_observation_spike", data, [
       { pubkey: config, isSigner: false, isWritable: false },
       { pubkey: target, isSigner: false, isWritable: true },
       { pubkey: payer, isSigner: true, isWritable: true },
@@ -147,7 +147,7 @@ async function main(): Promise<void> {
   const account = await connection.getAccountInfo(commitment);
   assert.ok(account && account.owner.equals(program), "Commitment PDA is missing");
   const expectedPrefix = Buffer.concat([
-    discriminator("account", "ObservationCommitment"), Buffer.from([1]), nullifier,
+    discriminator("account", "SpikeObservationCommitment"), Buffer.from([1]), nullifier,
     ...inputs.map(scalar), config.toBuffer(), wallet.publicKey.toBuffer(),
   ]);
   assert.equal(account.data.length, expectedPrefix.length + 8);

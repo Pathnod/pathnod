@@ -10,7 +10,10 @@ import { DevelopmentObservationInbox, ObservationInboxError } from "./observatio
 import { ObservationPolicyService, ObservationPolicyError } from "./observation-policy.ts";
 import { SolanaObservationPolicySource } from "./observation-solana.ts";
 import { PinnedGroth16Verifier } from "./observation-groth16.ts";
-import { loadObservationSigner } from "./observation-authorization.ts";
+import { loadObservationSigner, loadPrivateKeypair } from "./observation-authorization.ts";
+import { PathnodObservationSubmissionAdapter } from './observation-adapter.ts';
+import { ObservationRelayer } from './observation-relay.ts';
+import { SolanaObservationRelayTransport } from './solana-observation-relay.ts';
 
 const MAX_BODY = 128 * 1024;
 
@@ -148,11 +151,13 @@ async function main(): Promise<void> {
   const observationProgram = process.env.PATHNOD_OBSERVATION_PROGRAM_ID;
   const observationProtocol = process.env.PATHNOD_OBSERVATION_PROTOCOL_ID;
   const verifierSigner = process.env.PATHNOD_OBSERVATION_VERIFIER_SIGNER;
+  const relayerPayer = process.env.PATHNOD_OBSERVATION_RELAYER_PAYER;
   const observationEnabled = [observationVK, observationSHA, observationRPC, observationProgram, observationProtocol].some(v => v !== undefined);
   if (observationEnabled && (receiptDB || !observationVK || !observationSHA || !observationRPC || !observationProgram || !observationProtocol)) {
     throw Error("Set all five PATHNOD_OBSERVATION_* required settings; do not enable the development receipt sink.");
   }
   if (verifierSigner && !observationEnabled) throw Error("Verifier signing requires the complete DEV-33 policy configuration");
+  if (relayerPayer && !verifierSigner) throw Error('A relayer payer requires the configured verifier signer');
   if (receiptDB && (process.env.NODE_ENV === "production" || !["127.0.0.1", "::1"].includes(host))) {
     throw Error("DEV-32 receipt sink requires a non-production loopback host.");
   }
@@ -173,17 +178,27 @@ async function main(): Promise<void> {
   let publisher: ObserverRootPublisher | undefined;
   let eligibility: DeviceEligibilityService | undefined;
   let observationPolicy: ObservationPolicyService | undefined;
+  let relayer: ObservationRelayer | undefined;
+  let relayTimer: ReturnType<typeof setInterval> | undefined;
   try {
     if (observationEnabled) {
       const proof = new PinnedGroth16Verifier(observationVK!, observationSHA!);
       const source = await SolanaObservationPolicySource.open(observationRPC!, observationProgram!, observationProtocol!,
         Number(process.env.PATHNOD_OBSERVATION_MINIMUM_RSSI ?? "-90"), Number(process.env.PATHNOD_OBSERVATION_POLICY_VERSION ?? "1"),
-        process.env.PATHNOD_OBSERVATION_GENESIS);
+        process.env.PATHNOD_OBSERVATION_GENESIS, verifierSigner ? proof.keyDigest : undefined);
+      const signer = verifierSigner ? await loadObservationSigner(verifierSigner) : undefined;
+      const policyTarget = `${source.target}/${proof.digest}/${appID}/${environment}/${categories.join(",")}/${versions.join(",")}`;
       observationPolicy = new ObservationPolicyService(db, {
         appID, environment, allowedValidationCategories: categories, allowedBundleVersions: versions,
-      }, { target: `${source.target}/${proof.digest}/${appID}/${environment}/${categories.join(",")}/${versions.join(",")}`,
+      }, { target: policyTarget,
         snapshot: t => source.snapshot(t) }, proof,
-      verifierSigner ? { relay: { signer: await loadObservationSigner(verifierSigner) } } : {});
+      signer ? { relay: { signer } } : {});
+      if (relayerPayer && signer) {
+        const transport = await SolanaObservationRelayTransport.open(observationRPC!, observationProgram!, observationProtocol!,
+          await loadPrivateKeypair(relayerPayer), signer.publicKey, new PathnodObservationSubmissionAdapter(proof.keyDigest),
+          process.env.PATHNOD_OBSERVATION_GENESIS);
+        relayer = new ObservationRelayer(db, policyTarget, signer.publicKey, transport);
+      }
     }
     const eligibilityRPC = process.env.PATHNOD_ELIGIBILITY_RPC_URL;
     const eligibilityProgram = process.env.PATHNOD_ELIGIBILITY_PROGRAM_ID;
@@ -204,17 +219,22 @@ async function main(): Promise<void> {
       });
       publisher.start();
     }
-  } catch (error) { observationPolicy?.close(); service.close(); gate.close(); throw error; }
+  } catch (error) { await relayer?.close(); observationPolicy?.close(); service.close(); gate.close(); throw error; }
   const inbox = receiptDB ? new DevelopmentObservationInbox(receiptDB) : undefined;
   const server = createEnrollmentServer(service, publisher, eligibility, inbox, observationPolicy);
   server.requestTimeout = 15_000;
   server.listen(port, host, () => { process.stdout.write(`Enrollment server listening on ${host}:${port}\n`); });
+  if (relayer) {
+    const tick = () => { void relayer!.tick().catch(() => process.stderr.write('Observation relay tick failed; queued jobs remain durable.\n')); };
+    relayTimer = setInterval(tick, 2_000); relayTimer.unref(); tick();
+  }
   let closing = false;
   const close = () => {
     if (closing) return;
     closing = true;
+    if (relayTimer) clearInterval(relayTimer);
     server.close(() => {
-      void (async () => { await publisher?.close(); observationPolicy?.close(); inbox?.close(); service.close(); gate.close(); })();
+      void (async () => { await relayer?.close(); await publisher?.close(); observationPolicy?.close(); inbox?.close(); service.close(); gate.close(); })();
     });
   };
   process.once("SIGINT", close);

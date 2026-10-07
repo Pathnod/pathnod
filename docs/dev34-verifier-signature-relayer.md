@@ -7,13 +7,11 @@ atomically with its receipt and counter updates. The relayer library persists
 signed Solana transactions before sending, reconciles ambiguous outcomes, and
 exposes queued/submitted/confirmed/failed status separately from policy validation.
 
-**Production submission is not wired yet.** DEV-35 must implement
-`ObservationSubmissionAdapter` using the final instruction/account ABI and check
-the resulting observation commitment in `confirm`. The DEV-16 caller-selected-VK
-spike must never be substituted for that adapter. There is no production relay
-CLI, automatic worker timer, public enqueue endpoint, or reward-payment claim.
-The HTTP server queues accepted observations when signing is enabled; it does
-not start broadcasting. Its existing `validated` receipt remains a policy receipt.
+[DEV-35](dev35-submit-observation.md) implements `PathnodObservationSubmissionAdapter`
+with the trusted instruction/account ABI and finalized commitment checks.
+Setting `PATHNOD_OBSERVATION_RELAYER_PAYER` starts its automatic worker in the HTTP
+server. Signing without a payer retains durable queueing. The existing `validated`
+receipt remains a policy receipt. Reward payments are planned in DEV-36.
 
 ## Frozen authorization contract
 
@@ -31,12 +29,14 @@ Policy version uses Borsh/ProtocolConfig little-endian encoding. A shared public
 fixture locks bytes, digest, public key and signature across TypeScript and Rust.
 Its deterministic test key is **not a production verifier**.
 
+DEV-35 retains this v0 digest for zero evidence and adds a v1 digest that also
+authenticates a nonzero evidence hash; see its authorization ABI documentation.
+
 The 480-byte proof uses the existing DEV-15 ABI: negated A, G2 c1/c0 limbs, C,
 then seven big-endian Fr inputs. The queue checks that epoch, nullifier, pseudonym
 and class agree with those inputs. The Solana transport inserts a self-contained
-Ed25519 precompile immediately before the DEV-35 consumer instruction; DEV-35
-must inspect and bind that instruction, not merely accept arbitrary prior Ed25519
-verification.
+Ed25519 precompile immediately before the DEV-35 consumer instruction, which
+inspects its canonical offsets and binds the configured key and expected digest.
 
 ## Signing and storage
 
@@ -112,10 +112,9 @@ tampered signature, sends the valid public fixture, and confirms finalized succe
 It does **not** deploy Pathnod, register an observation, verify a Groth16 proof
 onchain or pay rewards. The wallet must contain devnet SOL, never mainnet funds.
 
-DEV-35 end-to-end acceptance remains open: actual submission/account ABI,
-onchain authorization binding, real commitment/nullifier confirmation, executable
-worker integration and tests for concurrent/external submissions and key/root
-changes on a validator/devnet. A signature probe cannot validate these properties.
+The [DEV-35 validation harness and evidence](dev35-submit-observation.md) cover
+the actual submission ABI, authorization binding, commitment/nullifier
+confirmation, worker integration and external submissions on a validator/devnet.
 
 ### Recorded development validation — 2026-10-07
 

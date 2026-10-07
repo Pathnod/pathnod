@@ -7,6 +7,7 @@ const FR = 218882428718392752222464057452572750885483644004160343436982041865758
 const FQ = 21888242871839275222246405745257275088696311157297823662689037894645226208583n;
 export interface ObservationAuthorization {
   transcriptHash: string; nullifier: string; pseudonym: string; observerClass: number; policyVersion: number;
+  evidenceHash?: string;
 }
 export function hex32(value: string): Buffer {
   if (!/^[a-f0-9]{64}$/.test(value)) throw Error("Invalid canonical bytes32");
@@ -18,7 +19,10 @@ export function authorizationPreimage(value: ObservationAuthorization): Buffer {
       ![1, 2, 3].includes(value.observerClass) || !Number.isInteger(value.policyVersion) ||
       value.policyVersion < 1 || value.policyVersion > 0xffff_ffff) throw Error("Invalid authorization fields");
   const version = Buffer.alloc(4); version.writeUInt32LE(value.policyVersion);
-  return Buffer.concat([Buffer.from("Pathnod/verified/v0", "ascii"), hash, nullifier, pseudonym,
+  const evidence = value.evidenceHash === undefined ? Buffer.alloc(32) : hex32(value.evidenceHash);
+  const present = evidence.some(byte => byte !== 0);
+  return Buffer.concat([Buffer.from(present ? "Pathnod/verified/v1" : "Pathnod/verified/v0", "ascii"), hash,
+    ...(present ? [evidence] : []), nullifier, pseudonym,
     Buffer.from([value.observerClass]), version]);
 }
 export function authorizationDigest(value: ObservationAuthorization): Buffer {
@@ -37,12 +41,15 @@ export class ObservationSigner {
 }
 /** Solana-format local key file; no seed in environment variables, URLs or logs. */
 export async function loadObservationSigner(path: string): Promise<ObservationSigner> {
+  const key = await loadPrivateKeypair(path);
+  return new ObservationSigner(key.secretKey.subarray(0, 32));
+}
+export async function loadPrivateKeypair(path: string): Promise<Keypair> {
   const info = await stat(path);
   if (!info.isFile() || info.size > 4096 || (info.mode & 0o077) !== 0) throw Error("Verifier key must be a private, bounded file (chmod 600)");
   const value: unknown = JSON.parse(await readFile(path, "utf8"));
   if (!Array.isArray(value) || value.length !== 64 || value.some(v => !Number.isInteger(v) || v < 0 || v > 255)) throw Error("Invalid verifier key file");
-  const key = Keypair.fromSecretKey(Uint8Array.from(value));
-  return new ObservationSigner(key.secretKey.subarray(0, 32));
+  return Keypair.fromSecretKey(Uint8Array.from(value));
 }
 export function verifyAuthorization(value: ObservationAuthorization, publicKey: string, signature: string): boolean {
   if (!/^[a-f0-9]{128}$/.test(signature)) return false;
