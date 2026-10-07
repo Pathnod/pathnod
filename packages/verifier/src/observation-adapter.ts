@@ -4,6 +4,7 @@ import {
   decodeObservationVerifier,
   observationAddresses,
   submitObservation,
+  DEVNET_USDC,
 } from "@pathnod/solana";
 import { hex32 } from "./observation-authorization.ts";
 import type { ObservationRelayPayload } from "./observation-relay.ts";
@@ -15,10 +16,12 @@ export class PathnodObservationSubmissionAdapter
   readonly contract: string;
   readonly computeUnitLimit = 299_999;
   readonly verificationKeyHash: string;
-  constructor(verificationKeyHash: string) {
+  readonly mint: PublicKey;
+  constructor(verificationKeyHash: string, mint = DEVNET_USDC) {
     hex32(verificationKeyHash);
     this.verificationKeyHash = verificationKeyHash;
-    this.contract = `Pathnod/submit_observation/v1/${verificationKeyHash}`;
+    this.mint = mint;
+    this.contract = `Pathnod/submit_observation/v2/${verificationKeyHash}/${mint.toBase58()}`;
   }
   async validateTarget(connection: Connection, program: PublicKey) {
     const address = PublicKey.findProgramAddressSync(
@@ -48,6 +51,7 @@ export class PathnodObservationSubmissionAdapter
       hex32(payload.transcriptHash),
       hex32(payload.evidenceHash),
       Buffer.from(payload.proofBytes, "hex"),
+      this.mint,
     );
   }
   async confirm(

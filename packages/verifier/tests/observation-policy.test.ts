@@ -16,6 +16,7 @@ import { PublicKey } from "@solana/web3.js";
 import { SolanaObservationPolicySource } from "../src/observation-solana.ts";
 import { ObservationSigner, verifyAuthorization } from "../src/observation-authorization.ts";
 import type { ObservationRelayPayload } from "../src/observation-relay.ts";
+import { claimDigest, DEVNET_USDC } from '@pathnod/solana';
 
 const vector = JSON.parse(readFileSync(new URL("../../../fixtures/observations/transcript-v0.json", import.meta.url), "utf8")).vectors[0];
 const policy = { appID: "U5MCCC24G5.xyz.pathnod.appattestspike", environment: "development", allowedValidationCategories: [3], allowedBundleVersions: [] } as const;
@@ -45,13 +46,18 @@ async function fixture(capacity = 100) {
   const snapshot = { device: { key: t.publicKey, curve: 1, capabilities: 2 }, epochSeconds: 60,
     verifier: "", policyVersion: 1,
     minimumRSSI: -90, roots: [BigInt(vector.enrollment.root).toString()], nullifierUsed: false };
-  const source: ObservationPolicySource = { target: "test-only/dev33", snapshot: async () => {
+  const source: ObservationPolicySource = { target: "test-only/dev33",
+    claim: async (_pseudo,key,destination,expiresAt) => ({program:DEVNET_USDC.toBase58(),payout:DEVNET_USDC.toBase58(),mint:DEVNET_USDC.toBase58(),withdrawalKey:key,destination,amount:'40000',nonce:'0',expiresAt:expiresAt!,policyVersion:1}),
+    prepareClaim: async () => ({message:'test-only',blockhash:'test-only',lastValidBlockHeight:1}), snapshot: async () => {
     if (unavailable) throw Error("test RPC unavailable"); return snapshot;
   } };
   const proof = { verify: async () => { proofCalls++; return proofValid; } };
   let service = new ObservationPolicyService(path, policy, source, proof, { clock: () => now, capacity });
   function assertion(bytes: Buffer, assertionCounter = 1): string {
     const hash = createHash("sha256").update("Pathnod/transcript/v0").update(bytes).digest();
+    return claimAssertion(hash,assertionCounter);
+  }
+  function claimAssertion(hash: Buffer, assertionCounter: number): string {
     const counter = Buffer.alloc(4); counter.writeUInt32BE(assertionCounter);
     const auth = Buffer.concat([digest(Buffer.from(policy.appID)), Buffer.from([0]), counter]);
     return cbor(new Map([["signature", sign("sha256", digest(auth, hash), key.privateKey)], ["authenticatorData", auth]])).toString("base64");
@@ -64,7 +70,7 @@ async function fixture(capacity = 100) {
           BigInt("0x" + Buffer.from(transcript.nullifier).toString("hex")).toString(),
           BigInt("0x" + Buffer.from(transcript.pseudonym).toString("hex")).toString(), String(transcript.observerClass)] } };
   }
-  return { dir, path, db, gate, enrollment, t, keyID, snapshot, envelope, assertion,
+  return { dir, path, db, gate, enrollment, t, keyID, snapshot, envelope, assertion, claimAssertion, source,
     get service() { return service; }, get proofCalls() { return proofCalls; },
     setNow: (n: number) => { now = n; }, setProof: (v: boolean) => { proofValid = v; }, setUnavailable: () => { unavailable = true; },
     restart: () => { service.close(); service = new ObservationPolicyService(path, policy, source, proof, { clock: () => now, capacity }); },
@@ -100,6 +106,23 @@ test("DEV-34: only successful fresh validation atomically signs and queues one p
     assert.equal(f.gate.getKey(f.keyID)!.counter, 1);
     f.enableRelay(signer); await f.service.receive(envelope);
     assert.equal(f.db.prepare("SELECT COUNT(*) AS n FROM observation_relay_jobs").get()!.n, 1);
+  } finally { f.close(); }
+});
+test('DEV-36 first withdrawal requires the attested observation owner and fresh destination-bound assertion', async () => {
+  const f=await fixture(); const signer=new ObservationSigner(Buffer.alloc(32,7));
+  try {
+    f.enableRelay(signer);
+    const request={pseudonym:Buffer.from(f.t.pseudonym).toString('hex'),withdrawal_key:DEVNET_USDC.toBase58(),destination:DEVNET_USDC.toBase58(),key_id:f.keyID,expires_at:'2000000000',assertion:''};
+    const authorization=await f.source.claim!(request.pseudonym,request.withdrawal_key,request.destination,request.expires_at);
+    request.assertion=f.claimAssertion(claimDigest(authorization),2);
+    await code('E_ASSERTION',f.service.authorizeClaim(request));
+    await f.service.receive(f.envelope());
+    await code('E_ASSERTION',f.service.authorizeClaim({...request,destination:PublicKey.default.toBase58()}));
+    assert.equal(f.gate.getKey(f.keyID)!.counter,1);
+    const result=await f.service.authorizeClaim(request);
+    assert.equal(result.signature,signer.signClaimDigest(claimDigest(authorization)));
+    assert.equal(f.gate.getKey(f.keyID)!.counter,2);
+    await code('E_ASSERTION',f.service.authorizeClaim(request));
   } finally { f.close(); }
 });
 test("DEV-34: historical receipts cannot enqueue; key mismatch and capacity never consume counters", async () => {

@@ -96,6 +96,19 @@ export function createEnrollmentServer(service: ObserverEnrollmentService, publi
         } else {
           send(response, 202, await inbox.receive(await body(request, ["transcript", "assertion", "key_id", "zk"], ["evidence"])));
         }
+      } else if (request.method === 'GET' && /^\/payouts\/[a-f0-9]{64}$/.test(url.pathname)) {
+        if (!policy || url.search) { send(response,503,{ error:'payments_unavailable' }); return; }
+        send(response,200,await policy.payout(url.pathname.split('/')[2]!));
+      } else if (request.method === 'POST' && url.pathname === '/payouts/quote') {
+        if (!policy) { send(response,503,{ error:'payments_unavailable' }); return; }
+        const input = await body(request,['pseudonym','withdrawal_key','destination']);
+        if (Object.values(input).some(v=>typeof v !== 'string')) throw new EnrollmentError('invalid_input');
+        send(response,200,await policy.claimQuote(String(input.pseudonym),String(input.withdrawal_key),String(input.destination)));
+      } else if (request.method === 'POST' && url.pathname === '/payouts/authorize') {
+        if (!policy) { send(response,503,{ error:'payments_unavailable' }); return; }
+        const input = await body(request,['pseudonym','withdrawal_key','destination','key_id','assertion','expires_at']);
+        if (Object.values(input).some(v=>typeof v !== 'string')) throw new EnrollmentError('invalid_input');
+        send(response,200,await policy.authorizeClaim(input as unknown as Parameters<ObservationPolicyService['authorizeClaim']>[0]));
       } else if (request.method === "POST" && url.pathname === "/enroll/challenge") {
         const input = await body(request, ["commitment", "keyID"]);
         send(response, 200, challenge(service.issueEnrollmentChallenge(input.commitment, input.keyID)));
@@ -191,12 +204,14 @@ async function main(): Promise<void> {
       observationPolicy = new ObservationPolicyService(db, {
         appID, environment, allowedValidationCategories: categories, allowedBundleVersions: versions,
       }, { target: policyTarget,
-        snapshot: t => source.snapshot(t) }, proof,
+        snapshot: t => source.snapshot(t), payout: p => source.payout(p),
+        paymentScope: source.paymentScope,
+        claim: (p,k,d,e) => source.claim(p,k,d,e), prepareClaim: (a,v,s) => source.prepareClaim(a,v,s) }, proof,
       signer ? { relay: { signer } } : {});
       if (relayerPayer && signer) {
         const transport = await SolanaObservationRelayTransport.open(observationRPC!, observationProgram!, observationProtocol!,
           await loadPrivateKeypair(relayerPayer), signer.publicKey, new PathnodObservationSubmissionAdapter(proof.keyDigest),
-          process.env.PATHNOD_OBSERVATION_GENESIS);
+          process.env.PATHNOD_OBSERVATION_GENESIS,process.env.PATHNOD_OBSERVATION_LOOKUP_TABLE);
         relayer = new ObservationRelayer(db, policyTarget, signer.publicKey, transport);
       }
     }

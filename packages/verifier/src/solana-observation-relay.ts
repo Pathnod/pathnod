@@ -1,4 +1,5 @@
-import { ComputeBudgetProgram, Connection, Keypair, PublicKey, Transaction, type TransactionInstruction } from "@solana/web3.js";
+import { ComputeBudgetProgram, Connection, Keypair, PublicKey, Transaction, TransactionMessage, VersionedTransaction,
+  type AddressLookupTableAccount, type TransactionInstruction } from "@solana/web3.js";
 import { activeRoots, decodeProtocol, decodeEnrollment, registryAddresses, UPGRADEABLE_LOADER } from "@pathnod/solana";
 import { authorizationInstruction, hex32 } from "./observation-authorization.ts";
 import type { ObservationRelayPayload, ObservationRelayTransport, PreparedObservationTransaction } from "./observation-relay.ts";
@@ -25,6 +26,7 @@ export class SolanaObservationRelayTransport implements ObservationRelayTranspor
   readonly payer: Keypair;
   readonly adapter: ObservationSubmissionAdapter;
   readonly verifier: string;
+  private lookup: AddressLookupTableAccount | undefined;
   private constructor(connection: Connection, program: PublicKey, protocol: Buffer,
     payer: Keypair, adapter: ObservationSubmissionAdapter, genesis: string, verifier: string) {
     this.connection = connection; this.program = program; this.protocol = protocol;
@@ -33,7 +35,7 @@ export class SolanaObservationRelayTransport implements ObservationRelayTranspor
     this.target = `${genesis}/${program.toBase58()}/${protocol.toString("hex")}/${verifier}/${payer.publicKey.toBase58()}/${adapter.contract}`;
   }
   static async open(rpcURL: string, program: string, protocol: string, payer: Keypair, verifier: string,
-    adapter: ObservationSubmissionAdapter, genesis = "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG") {
+    adapter: ObservationSubmissionAdapter, genesis = "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG", lookupTable?: string) {
     const url = new URL(rpcURL), local = ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname);
     if (url.username || url.password || url.search || url.hash ||
         !(url.protocol === "https:" || local && url.protocol === "http:")) throw Error("Invalid relay RPC");
@@ -43,7 +45,15 @@ export class SolanaObservationRelayTransport implements ObservationRelayTranspor
     const key = new PublicKey(program), account = await connection.getAccountInfo(key, "finalized");
     if (!account?.executable || !account.owner.equals(UPGRADEABLE_LOADER)) throw Error("Untrusted relay program");
     await adapter.validateTarget?.(connection, key);
-    return new SolanaObservationRelayTransport(connection, key, hex32(protocol), payer, adapter, genesis, verifier);
+    const transport = new SolanaObservationRelayTransport(connection, key, hex32(protocol), payer, adapter, genesis, verifier);
+    if (lookupTable) {
+      const table = await connection.getAddressLookupTable(new PublicKey(lookupTable), { commitment:'finalized' });
+      if (!table.value || table.value.state.deactivationSlot !== 0xffff_ffff_ffff_ffffn) throw Error('Inactive observation lookup table');
+      transport.lookup = table.value;
+      // Pin the exact table: changing it requires a new durable relay database target.
+      Object.defineProperty(transport,'target',{ value: transport.target+'/'+lookupTable });
+    }
+    return transport;
   }
   async eligible(payload: ObservationRelayPayload): Promise<boolean> {
     if (payload.protocolID !== this.protocol.toString("hex") || payload.verifier !== this.verifier) return false;
@@ -71,9 +81,18 @@ export class SolanaObservationRelayTransport implements ObservationRelayTranspor
       tx.add(ComputeBudgetProgram.setComputeUnitLimit({ units: this.adapter.computeUnitLimit }));
     }
     tx.add(authorizationInstruction(payload, payload.verifier, payload.verifierSignature), submit);
-    tx.sign(this.payer);
-    const wire = tx.serialize(); if (wire.length > 1232 || !tx.signature) throw Error("Transaction size/signature invalid");
-    return { wire: wire.toString("base64"), signature: signatureBase58(tx.signature), lastValidBlockHeight: latest.lastValidBlockHeight };
+    let wire: Buffer, signature: Uint8Array;
+    if (this.lookup) {
+      const message = new TransactionMessage({ payerKey:this.payer.publicKey,recentBlockhash:latest.blockhash,
+        instructions:tx.instructions }).compileToV0Message([this.lookup]);
+      const versioned = new VersionedTransaction(message); versioned.sign([this.payer]);
+      wire = Buffer.from(versioned.serialize()); signature = versioned.signatures[0]!;
+    } else {
+      tx.sign(this.payer); wire = tx.serialize();
+      if (!tx.signature) throw Error('Missing signature'); signature = tx.signature;
+    }
+    if (wire.length > 1232) throw Error("DEV-36 requires a configured, sufficiently populated address lookup table");
+    return { wire: wire.toString("base64"), signature: signatureBase58(signature), lastValidBlockHeight: latest.lastValidBlockHeight };
   }
   async send(transaction: PreparedObservationTransaction): Promise<void> {
     const signature = await this.connection.sendRawTransaction(Buffer.from(transaction.wire, "base64"),
