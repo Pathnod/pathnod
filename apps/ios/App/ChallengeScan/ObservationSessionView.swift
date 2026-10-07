@@ -109,6 +109,8 @@ struct ObservationSessionView: View {
             Section("Submission queue") {
                 Text("\(submission.pending) queued, \(submission.rejected) rejected. Pending envelopes are retried when this screen returns to the foreground; failed sends keep the original assertion. Rejected envelopes remain local for diagnosis.")
                     .font(.footnote)
+                Text("Retry and preparation use the selected service only. Envelopes for previous services remain saved; restore their original URL to retry them. Changing the URL never transfers an envelope.")
+                    .font(.footnote).foregroundStyle(.secondary)
                 Button("Retry due observations") { Task { await submission.retry(serverURL: serverURL) } }
                     .disabled(submission.busy || serverURL.isEmpty)
             }
@@ -220,9 +222,9 @@ private final class ObservationSubmissionModel: ObservableObject {
             throw ObservationSubmissionError.proverUnavailable
             #else
             let http = try client(serverURL), queue = try outbox()
-            if try queue.entries().contains(where: { !$0.rejected }) {
+            if try queue.hasPending(endpoint: http.endpoint) {
                 _ = try await queue.drain(client: http)
-                guard try !queue.entries().contains(where: { !$0.rejected }) else {
+                guard try !queue.hasPending(endpoint: http.endpoint) else {
                     status = "Retry previous envelopes before creating another assertion."; return
                 }
             }
