@@ -10,6 +10,7 @@ import { DevelopmentObservationInbox, ObservationInboxError } from "./observatio
 import { ObservationPolicyService, ObservationPolicyError } from "./observation-policy.ts";
 import { SolanaObservationPolicySource } from "./observation-solana.ts";
 import { PinnedGroth16Verifier } from "./observation-groth16.ts";
+import { loadObservationSigner } from "./observation-authorization.ts";
 
 const MAX_BODY = 128 * 1024;
 
@@ -146,10 +147,12 @@ async function main(): Promise<void> {
   const observationRPC = process.env.PATHNOD_OBSERVATION_RPC_URL;
   const observationProgram = process.env.PATHNOD_OBSERVATION_PROGRAM_ID;
   const observationProtocol = process.env.PATHNOD_OBSERVATION_PROTOCOL_ID;
+  const verifierSigner = process.env.PATHNOD_OBSERVATION_VERIFIER_SIGNER;
   const observationEnabled = [observationVK, observationSHA, observationRPC, observationProgram, observationProtocol].some(v => v !== undefined);
   if (observationEnabled && (receiptDB || !observationVK || !observationSHA || !observationRPC || !observationProgram || !observationProtocol)) {
     throw Error("Set all five PATHNOD_OBSERVATION_* required settings; do not enable the development receipt sink.");
   }
+  if (verifierSigner && !observationEnabled) throw Error("Verifier signing requires the complete DEV-33 policy configuration");
   if (receiptDB && (process.env.NODE_ENV === "production" || !["127.0.0.1", "::1"].includes(host))) {
     throw Error("DEV-32 receipt sink requires a non-production loopback host.");
   }
@@ -179,7 +182,8 @@ async function main(): Promise<void> {
       observationPolicy = new ObservationPolicyService(db, {
         appID, environment, allowedValidationCategories: categories, allowedBundleVersions: versions,
       }, { target: `${source.target}/${proof.digest}/${appID}/${environment}/${categories.join(",")}/${versions.join(",")}`,
-        snapshot: t => source.snapshot(t) }, proof);
+        snapshot: t => source.snapshot(t) }, proof,
+      verifierSigner ? { relay: { signer: await loadObservationSigner(verifierSigner) } } : {});
     }
     const eligibilityRPC = process.env.PATHNOD_ELIGIBILITY_RPC_URL;
     const eligibilityProgram = process.env.PATHNOD_ELIGIBILITY_PROGRAM_ID;

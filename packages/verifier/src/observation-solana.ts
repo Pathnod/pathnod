@@ -61,6 +61,7 @@ export class SolanaObservationPolicySource implements ObservationPolicySource {
     if (device && (!device.deviceId.equals(t.deviceID) || device.registeredAt <= 0n)) throw Error("Device account mismatch");
     // ANY existing PDA blocks acceptance, including an unexpected account layout/owner.
     return { device, epochSeconds: config.epochSeconds, minimumRSSI: this.#minimumRSSI,
+      verifier: config.verifier.toBase58(), policyVersion: config.policyVersion,
       roots: activeRoots(enrollment).map(root => BigInt("0x" + root.toString("hex")).toString()), nullifierUsed: accounts[3] !== null };
   }
 }
