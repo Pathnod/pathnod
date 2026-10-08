@@ -38,6 +38,10 @@ export class ObservationSigner {
     this.publicKey = new PublicKey(createPublicKey(this.#key).export({ format: "der", type: "spki" }).subarray(-32)).toBase58();
   }
   sign(value: ObservationAuthorization): string { return sign(null, authorizationDigest(value), this.#key).toString("hex"); }
+  signClaimDigest(digest: Uint8Array): string {
+    if (digest.length !== 32) throw Error('Invalid claim digest');
+    return sign(null, digest, this.#key).toString('hex');
+  }
 }
 /** Solana-format local key file; no seed in environment variables, URLs or logs. */
 export async function loadObservationSigner(path: string): Promise<ObservationSigner> {

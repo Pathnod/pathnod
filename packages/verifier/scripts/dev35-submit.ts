@@ -19,6 +19,7 @@ import {
   Transaction,
   TransactionInstruction,
   VersionedTransaction,
+  TransactionMessage, AddressLookupTableProgram, type AddressLookupTableAccount, Ed25519Program,
 } from "@solana/web3.js";
 import {
   TOKEN_PROGRAM,
@@ -38,6 +39,7 @@ import {
   observationAddresses,
   appendObservationTree,
   DEFAULT_OBSERVATION_KEY_DIGEST,
+  initializePayments, paymentAddresses, decodePayout, claimPayout, claimDigest, updatePolicy,
 } from "@pathnod/solana";
 import { AppAttestGate } from "../src/app-attest-gate.ts";
 import { ObserverEnrollmentService } from "../src/observer-enrollment.ts";
@@ -65,6 +67,7 @@ import {
   observationTranscriptHash,
 } from "../src/observation-transcript.ts";
 import type { ObservationEnvelope } from "../src/observation-inbox.ts";
+import { DeviceEligibilityService } from '../src/device-eligibility.ts';
 
 const root = fileURLToPath(new URL("../../..", import.meta.url));
 const args = new Map<string, string>();
@@ -79,6 +82,7 @@ for (let i = 2; i < process.argv.length; i += 2) {
       "--program",
       "--database",
       "--report",
+      "--payments",
     ].includes(key) ||
     !value ||
     args.has(key)
@@ -107,6 +111,7 @@ function outside(file: string) {
   return resolved;
 }
 async function main() {
+  const payments = args.get('--payments') === 'yes';
   const rpc = new URL(required("--rpc")),
     local = ["localhost", "127.0.0.1", "[::1]"].includes(rpc.hostname);
   assert.ok(
@@ -116,9 +121,29 @@ async function main() {
   const dbPath = outside(required("--database")),
     reportPath = outside(required("--report"));
   await mkdir(path.dirname(dbPath), { recursive: true, mode: 0o700 });
+  const nativeFetch = globalThis.fetch;
+  let requestQueue = Promise.resolve(), lastRequest = 0;
+  const pacedFetch: typeof fetch = async (input, init) => {
+    // Public devnet RPC is shared: serialize request starts rather than flooding it.
+    if (!local) {
+      const start = requestQueue.then(async () => {
+        await sleep(Math.max(0, 500 - (Date.now() - lastRequest)));
+        lastRequest = Date.now();
+      });
+      requestQueue = start.catch(() => {}); await start;
+    }
+    for (let attempt = 0; ; attempt++) {
+      const response = await nativeFetch(input, { ...init, redirect: 'error', signal: AbortSignal.timeout(15_000) });
+      if (local || response.status !== 429 || attempt >= 4) return response;
+      await response.text(); await sleep(5_000 * (attempt + 1));
+    }
+  };
+  // Source/transport readers must share this limiter too, not just the harness connection.
+  if (!local) globalThis.fetch = pacedFetch;
   const connection = new Connection(rpc.href, {
     commitment: "confirmed",
     disableRetryOnRateLimit: true,
+    fetch: pacedFetch,
   });
   const genesis = await connection.getGenesisHash();
   if (!local)
@@ -154,6 +179,7 @@ async function main() {
     bytes: number;
     units: number | null | undefined;
   }[] = [];
+  let lookup: AddressLookupTableAccount | undefined;
   async function prepared(
     instructions: TransactionInstruction[],
     signers: Keypair[] = [wallet],
@@ -162,6 +188,15 @@ async function main() {
       feePayer: signers[0]!.publicKey,
       ...(await connection.getLatestBlockhash("confirmed")),
     }).add(...instructions);
+    if (lookup) {
+      const latest = { blockhash:transaction.recentBlockhash!,lastValidBlockHeight:transaction.lastValidBlockHeight! };
+      const versioned = new VersionedTransaction(new TransactionMessage({ payerKey:signers[0]!.publicKey,
+        recentBlockhash:latest.blockhash,instructions }).compileToV0Message([lookup]));
+      versioned.sign(signers);
+      assert.ok(versioned.serialize().length <= 1232,'Transaction size limit');
+      return Object.assign(versioned,{ recentBlockhash:latest.blockhash,lastValidBlockHeight:latest.lastValidBlockHeight,
+        compileMessage:()=>versioned.message });
+    }
     transaction.sign(...signers);
     assert.ok(transaction.serialize().length <= 1232, "Transaction size limit");
     return transaction;
@@ -174,7 +209,7 @@ async function main() {
     const transaction = await prepared(instructions, signers);
     const signature = await connection.sendRawTransaction(
       transaction.serialize(),
-      { skipPreflight: false, maxRetries: 0, preflightCommitment: "confirmed" },
+      { skipPreflight: false, maxRetries: 5, preflightCommitment: "confirmed" },
     );
     await connection.confirmTransaction(
       {
@@ -289,6 +324,7 @@ async function main() {
         publisher.publicKey,
       ),
     ]);
+  await send('initialize_payments',[initializePayments(program,publisher.publicKey,mint,wallet.publicKey)],[publisher]);
   const verifierAddress = observationAddresses(
     program,
     protocol,
@@ -325,10 +361,24 @@ async function main() {
       epochSeconds,
       verifier: verifierKey.publicKey,
       policyVersion: 1,
-      rewardPerSlot: 0n,
-      slotsPerEpoch: 0,
+      rewardPerSlot: payments ? 50_000n : 0n,
+      slotsPerEpoch: payments ? 3 : 0,
     }),
   ]);
+  if (payments) {
+    // Local validator: mint synthetic units. Devnet: use the wallet's real Circle test USDC ATA.
+    const amount = Buffer.alloc(8); amount.writeBigUInt64LE(50_000n);
+    if (local) await send('fund_escrow',[new TransactionInstruction({ programId:TOKEN_PROGRAM,
+      keys:[{pubkey:mint,isSigner:false,isWritable:true},{pubkey:addresses.escrow,isSigner:false,isWritable:true},
+        {pubkey:wallet.publicKey,isSigner:true,isWritable:false}], data:Buffer.concat([Buffer.from([7]),amount]) })]);
+    else {
+      const associated = new PublicKey('ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL');
+      const ata = PublicKey.findProgramAddressSync([wallet.publicKey.toBuffer(),TOKEN_PROGRAM.toBuffer(),mint.toBuffer()],associated)[0];
+      await send('fund_escrow',[new TransactionInstruction({programId:TOKEN_PROGRAM,
+        keys:[{pubkey:ata,isSigner:false,isWritable:true},{pubkey:addresses.escrow,isSigner:false,isWritable:true},
+          {pubkey:wallet.publicKey,isSigner:true,isWritable:false}],data:Buffer.concat([Buffer.from([3]),amount])})]);
+    }
+  }
   await send("register_device", [
     registerDevice(program, wallet.publicKey, protocol, {
       deviceId: device,
@@ -339,6 +389,10 @@ async function main() {
       claimedGeohash: null,
     }),
   ]);
+  const eligibility=await DeviceEligibilityService.open(rpc.href,program.toBase58(),protocol.toString('hex'),mint.toBase58());
+  const quote=await eligibility.slots(device.toString('hex'),'0');
+  assert.equal(quote.open_slots,payments ? 1 : 0);
+  assert.equal(quote.reward,payments ? '0.04' : '0');
   const appPolicy = {
     appID: "TESTTEAM01.xyz.pathnod.dev35.synthetic",
     environment: "development",
@@ -410,7 +464,19 @@ async function main() {
   );
   const adapter = new PathnodObservationSubmissionAdapter(
     proofVerifier.keyDigest,
+    mint,
   );
+  const [createLookup,lookupAddress] = AddressLookupTableProgram.createLookupTable({authority:wallet.publicKey,
+    payer:wallet.publicKey,recentSlot:await connection.getSlot('finalized')});
+  await send('create_lookup_table',[createLookup]);
+  const lookupKeys = [addresses.config,addresses.escrow,addresses.enrollment,addresses.device(device),mint,TOKEN_PROGRAM,
+    SystemProgram.programId, new PublicKey('Sysvar1nstructions1111111111111111111111111'),
+    paymentAddresses(program,protocol,Buffer.alloc(32)).settings,paymentAddresses(program,protocol,Buffer.alloc(32)).feeVault,
+    ...proofs.vectors.map(v=>addresses.root(Buffer.from(BigInt(v.public[0]!).toString(16).padStart(64,'0'),'hex')))];
+  await send('extend_lookup_table',[AddressLookupTableProgram.extendLookupTable({lookupTable:lookupAddress,
+    authority:wallet.publicKey,payer:wallet.publicKey,addresses:[...new Map(lookupKeys.map(k=>[k.toBase58(),k])).values()]})]);
+  lookup = (await connection.getAddressLookupTable(lookupAddress,{commitment:'finalized'})).value ?? undefined;
+  assert.ok(lookup);
   const transport = await SolanaObservationRelayTransport.open(
     rpc.href,
     program.toBase58(),
@@ -419,6 +485,7 @@ async function main() {
     signer.publicKey,
     adapter,
     genesis,
+    lookupAddress.toBase58(),
   );
   let worker = new ObservationRelayer(
     dbPath,
@@ -787,7 +854,8 @@ async function main() {
       frontier = next.frontier;
       expectedRoot = next.root;
       assert.equal(state.independentObservers, i + 1);
-      assert.equal(state.paidSlotsUsed, 0);
+      assert.equal(state.paidSlotsUsed, payments ? 1 : 0);
+      assert.equal(decodeObservationCommitment(record.data).slotPaid,payments && i===0);
       assert.ok(state.observationRoot.equals(expectedRoot));
       await reject("duplicate nullifier", valid, 6001);
       const unchanged = decodeDeviceEpoch(
@@ -806,6 +874,44 @@ async function main() {
         ),
         i + 1,
       );
+    }
+    if (payments) {
+      const payload = payloads[0]!, a = paymentAddresses(program,protocol,raw(payload.pseudonym));
+      const credited = decodePayout((await connection.getAccountInfo(a.payout,'finalized'))!.data);
+      assert.equal(credited.gross,50_000n);assert.equal(credited.fees,10_000n);assert.equal(credited.available,40_000n);
+      assert.equal((await connection.getTokenAccountBalance(a.feeVault,'finalized')).value.amount,'10000');
+      assert.equal((await connection.getTokenAccountBalance(a.vault,'finalized')).value.amount,'40000');
+      assert.equal((await connection.getTokenAccountBalance(addresses.escrow,'finalized')).value.amount,'0');
+      const withdrawal = Keypair.generate(), destination = Keypair.generate();
+      await send('prepare_withdrawal',[SystemProgram.transfer({fromPubkey:wallet.publicKey,toPubkey:withdrawal.publicKey,lamports:10_000_000}),
+        SystemProgram.createAccount({fromPubkey:wallet.publicKey,newAccountPubkey:destination.publicKey,space:165,
+          lamports:await connection.getMinimumBalanceForRentExemption(165),programId:TOKEN_PROGRAM}),
+        new TransactionInstruction({programId:TOKEN_PROGRAM,keys:[{pubkey:destination.publicKey,isSigner:false,isWritable:true},
+          {pubkey:mint,isSigner:false,isWritable:false}],data:Buffer.concat([Buffer.from([18]),withdrawal.publicKey.toBuffer()])})], [wallet,destination]);
+      const expiry=BigInt(Math.floor(Date.now()/1000)+240), auth = {program:program.toBase58(),payout:a.payout.toBase58(),mint:mint.toBase58(),
+        withdrawalKey:withdrawal.publicKey.toBase58(),destination:destination.publicKey.toBase58(),amount:'40000',nonce:'0',expiresAt:String(expiry),policyVersion:1};
+      const claim = claimPayout(program,protocol,raw(payload.pseudonym),mint,withdrawal.publicKey,destination.publicKey,40_000n,0n,expiry);
+      const ed = Ed25519Program.createInstructionWithPublicKey({publicKey:verifierKey.publicKey.toBuffer(),
+        message:claimDigest(auth),signature:Buffer.from(signer.signClaimDigest(claimDigest(auth)),'hex')});
+      const wrong = claimPayout(program,protocol,raw(payload.pseudonym),mint,other.publicKey,destination.publicKey,40_000n,0n,expiry);
+      const bad = await prepared([ed,wrong],[other]);
+      const sim = new VersionedTransaction(bad.compileMessage());sim.sign([other]);
+      assert.ok((await connection.simulateTransaction(sim,{sigVerify:true})).value.err,'Wrong destination owner must fail');
+      for (const invalid of [claim,
+        claimPayout(program,protocol,raw(payload.pseudonym),mint,withdrawal.publicKey,destination.publicKey,40_001n,0n,expiry),
+        claimPayout(program,protocol,raw(payload.pseudonym),mint,withdrawal.publicKey,destination.publicKey,40_000n,1n,expiry),
+        claimPayout(program,protocol,raw(payload.pseudonym),mint,withdrawal.publicKey,destination.publicKey,40_000n,0n,BigInt(Math.floor(Date.now()/1000)-1))]) {
+        const unsigned=new VersionedTransaction((await prepared([invalid],[withdrawal])).compileMessage());
+        assert.ok((await connection.simulateTransaction(unsigned,{sigVerify:false})).value.err,'Unsafe first claim must fail');
+      }
+      await send('claim_payout',[ed,claim],[withdrawal]);
+      const done = decodePayout((await connection.getAccountInfo(a.payout,'finalized'))!.data);
+      assert.equal(done.available,0n);assert.equal(done.withdrawn,40_000n);assert.equal(done.nonce,1n);
+      assert.equal((await connection.getTokenAccountBalance(destination.publicKey,'finalized')).value.amount,'40000');
+      const replay = await prepared([ed,claim],[withdrawal]), replayed = new VersionedTransaction(replay.compileMessage());replayed.sign([withdrawal]);
+      assert.ok((await connection.simulateTransaction(replayed,{sigVerify:true})).value.err,'Double claim must fail');
+      await send('update_policy',[updatePolicy(program,protocol,wallet.publicKey,2,verifierKey.publicKey,60_000n,1)]);
+      assert.equal(decodePayout((await connection.getAccountInfo(a.payout,'finalized'))!.data).withdrawn,40_000n);
     }
     for (let i = 0; i < 4; i++) {
       const rotated = Buffer.alloc(32);
@@ -846,7 +952,7 @@ async function main() {
       transactions.push({
         name: "worker_submit",
         signature,
-        bytes: 1207,
+        bytes: Buffer.from(String(db.prepare('SELECT wire FROM observation_relay_jobs WHERE transcript_hash=?').get(payloads[0]!.transcriptHash)!.wire),'base64').length,
         units: executed.meta.computeUnitsConsumed,
       });
     }
@@ -859,8 +965,9 @@ async function main() {
       verificationKeyDigest: proofVerifier.keyDigest,
       observers: 2,
       independentObservers: 2,
-      paidSlotsUsed: 0,
-      packetBytes: 1207,
+      paidSlotsUsed: payments ? 1 : 0,
+      payoutsTested: payments,
+      lookupTable:lookupAddress.toBase58(),
       transactions,
       lostResponseRestart: true,
       externalSubmissionReconciled: true,

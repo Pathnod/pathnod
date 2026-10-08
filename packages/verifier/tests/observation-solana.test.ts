@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { createServer } from "node:http";
 import { PublicKey, type AccountInfo } from "@solana/web3.js";
-import { DEFAULT_OBSERVATION_KEY_DIGEST, discriminator } from "@pathnod/solana";
+import { DEFAULT_OBSERVATION_KEY_DIGEST, discriminator, paymentAddresses, DEVNET_USDC, TOKEN_PROGRAM } from "@pathnod/solana";
 import { eligibilityAccounts } from "./helpers/eligibility-accounts.ts";
 import { SolanaObservationPolicySource } from "../src/observation-solana.ts";
 import { decodeObservationTranscript } from "../src/observation-transcript.ts";
@@ -23,6 +23,26 @@ function fixture() {
     f.program, f.protocol, "synthetic-genesis", -90, 3);
   return { ...f, t, enrollment, rows, requests, source };
 }
+test('DEV-36 finalized balances and quotes reject wrong payout owner, mint and destination',async()=>{
+  const f=eligibilityAccounts(),pseudo=Buffer.alloc(32,2),p=paymentAddresses(f.program,f.protocol,pseudo);
+  const payout=Buffer.alloc(176);discriminator('account','Payout').copy(payout);
+  f.protocol.copy(payout,8);pseudo.copy(payout,40);DEVNET_USDC.toBuffer().copy(payout,72);
+  payout.writeBigUInt64LE(50000n,136);payout.writeBigUInt64LE(10000n,144);payout.writeBigUInt64LE(40000n,152);
+  const key=new PublicKey(Buffer.alloc(32,3)),destination=new PublicKey(Buffer.alloc(32,4));
+  const token=Buffer.alloc(165);DEVNET_USDC.toBuffer().copy(token);key.toBuffer().copy(token,32);token[108]=1;
+  const record=f.account(payout);
+  const source=new SolanaObservationPolicySource({read:async addresses=>addresses.length===1 ? [{...f.account(token),owner:TOKEN_PROGRAM}] :
+    [f.rows[0]!,record,f.rows[3]!]},f.program,f.protocol,'test-only',-90,3);
+  assert.equal((await source.payout(pseudo.toString('hex'))).available,'0.040000');
+  const claim=()=>source.claim(pseudo.toString('hex'),key.toBase58(),destination.toBase58());
+  assert.equal((await claim()).amount,'40000');
+  token[108]=2;await assert.rejects(claim,/destination/);token[108]=1;
+  PublicKey.default.toBuffer().copy(token,32);await assert.rejects(claim,/destination/);key.toBuffer().copy(token,32);
+  record.owner=PublicKey.default;await assert.rejects(claim,/Untrusted/);record.owner=f.program;
+  payout[72]=payout[72]!^1;await assert.rejects(claim,/binding/);payout[72]=payout[72]!^1;
+  key.toBuffer().copy(payout,104);
+  await assert.rejects(()=>source.claim(pseudo.toString('hex'),destination.toBase58(),destination.toBase58()),/withdrawal/);
+});
 test("DEV-33 chain source reads exact protocol/device/root/nullifier PDAs and the last four published roots", async () => {
   const f = fixture(), result = await f.source.snapshot(f.t);
   assert.deepEqual(result.roots, ["1", "4", "3", "2"]);
@@ -52,7 +72,7 @@ test("DEV-35 signing source pins the circuit metadata in the same finalized snap
   const f = fixture();
   const metadata = Buffer.concat([
     discriminator("account", "ObservationVerifierInfo"),
-    Buffer.from(DEFAULT_OBSERVATION_KEY_DIGEST, "hex"), Buffer.from([1, 7]),
+    Buffer.from(DEFAULT_OBSERVATION_KEY_DIGEST, "hex"), Buffer.from([2, 7]),
   ]);
   f.rows.push(f.account(metadata));
   const source = new SolanaObservationPolicySource({ read: async addresses => {

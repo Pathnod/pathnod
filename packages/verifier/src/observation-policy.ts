@@ -5,6 +5,7 @@ import { parseObservationEnvelope, type ObservationEnvelope } from "./observatio
 import { decodeObservationTranscript, type ObservationTranscript, type TranscriptChallenge } from "./observation-transcript.ts";
 import { ObservationSigner, relayProofBytes } from "./observation-authorization.ts";
 import { initializeObservationRelay, queueValidatedObservation, type ObservationRelayPayload } from "./observation-relay.ts";
+import { claimDigest, type ClaimAuthorization } from '@pathnod/solana';
 
 export type ObservationPolicyCode = "E_DEVICE_UNKNOWN" | "E_DEV_SIG" | "E_DEV_COUNTER" | "E_RTT" |
   "E_EPOCH" | "E_ASSERTION" | "E_ZK" | "E_NULLIFIER" | "E_RSSI";
@@ -18,6 +19,10 @@ export interface ValidatedObservationReceipt {
 /** Implementations must authenticate account owners, PDA addresses and their configured cluster/program. */
 export interface ObservationPolicySource {
   readonly target: string;
+  readonly paymentScope?: string;
+  payout?(pseudonym: string): Promise<Record<string, unknown>>;
+  claim?(pseudonym: string, withdrawalKey: string, destination: string, expiresAt?: string): Promise<ClaimAuthorization>;
+  prepareClaim?(authorization: ClaimAuthorization, verifier: string, signature: string): Promise<{ message: string; blockhash: string; lastValidBlockHeight: number }>;
   snapshot(transcript: ObservationTranscript): Promise<{
     device: { key: Uint8Array; curve: number; capabilities: number } | undefined;
     epochSeconds: number;
@@ -76,6 +81,9 @@ export class ObservationPolicyService {
         transcript_hash TEXT PRIMARY KEY, envelope_hash TEXT NOT NULL, nullifier TEXT NOT NULL UNIQUE, validated_at INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS observation_device_counters_v0 (device_id TEXT PRIMARY KEY, counter INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS observer_revocations_v0 (key_id TEXT PRIMARY KEY, revoked_at INTEGER NOT NULL);
+      CREATE TABLE IF NOT EXISTS observation_payout_owners_v0 (
+        protocol TEXT NOT NULL, pseudonym TEXT NOT NULL, key_id TEXT NOT NULL,
+        PRIMARY KEY(protocol, pseudonym));
     `);
     this.#db.prepare("INSERT OR IGNORE INTO observation_policy_target VALUES (1, ?)").run(source.target);
     if (this.#db.prepare("SELECT target FROM observation_policy_target WHERE id=1").get()?.target !== source.target) {
@@ -92,12 +100,48 @@ export class ObservationPolicyService {
     }
   }
   close(): void { this.#db.close(); }
+  async payout(pseudonym: string) {
+    if (!this.#source.payout) throw new ObservationPolicyError('observation_dependency_unavailable');
+    return this.#source.payout(pseudonym);
+  }
+  async authorizeClaim(input: { pseudonym: string; withdrawal_key: string; destination: string; key_id: string; assertion: string; expires_at: string }) {
+    if (!this.#relay || !this.#source.claim) throw new ObservationPolicyError('observation_dependency_unavailable');
+    const authorization = await this.#source.claim(input.pseudonym, input.withdrawal_key, input.destination, input.expires_at);
+    const key = this.#key(input.key_id);
+    if (!key) reject('E_ASSERTION');
+    // The relationship was established ONLY after an attested, ZK-verified observation.
+    const owner = this.#db.prepare('SELECT key_id FROM observation_payout_owners_v0 WHERE pseudonym=? AND protocol=?')
+      .get(input.pseudonym, this.#source.paymentScope ?? this.#source.target);
+    if (owner?.key_id !== input.key_id || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(input.assertion)
+        || input.assertion.length > 16384) reject('E_ASSERTION');
+    let asserted: VerifiedAppAttestKey;
+    try { asserted = this.#attest.verifyAssertion({ key, object: Buffer.from(input.assertion, 'base64'),
+      expectedChallenge: claimDigest(authorization), challengeIsClientDataHash: true }); }
+    catch { reject('E_ASSERTION'); }
+    let signature: string;
+    this.#db.exec('BEGIN IMMEDIATE');
+    try {
+      const current = this.#key(input.key_id);
+      if (!current || current.counter !== key.counter || current.publicKeyPem !== key.publicKeyPem) reject('E_ASSERTION');
+      const changed = this.#db.prepare('UPDATE app_attest_keys SET counter=?, bundle_version=? WHERE key_id=? AND counter=?')
+        .run(asserted.counter, asserted.bundleVersion ?? null, input.key_id, key.counter);
+      if (changed.changes !== 1) reject('E_ASSERTION');
+      signature = this.#relay.signer.signClaimDigest(claimDigest(authorization));
+      this.#db.exec('COMMIT');
+    } catch (error) { if (this.#db.isTransaction) this.#db.exec('ROLLBACK'); throw error; }
+    const prepared = await this.#source.prepareClaim?.(authorization,this.#relay.signer.publicKey,signature);
+    return { authorization, verifier: this.#relay.signer.publicKey, signature, ...prepared };
+  }
+  async claimQuote(pseudonym: string, withdrawalKey: string, destination: string) {
+    if (!this.#source.claim) throw new ObservationPolicyError('observation_dependency_unavailable');
+    return this.#source.claim(pseudonym, withdrawalKey, destination);
+  }
   relayStatus(hash: string) {
     if (!/^[a-f0-9]{64}$/.test(hash)) throw Error("Invalid transcript hash");
     if (!this.#relay) return undefined;
     const row = this.#db.prepare("SELECT status, signature, last_error FROM observation_relay_jobs WHERE transcript_hash=?").get(hash);
     return row ? { status: row.status, transaction_signature: row.signature, error: row.last_error,
-      on_chain: row.status === "confirmed", paid: false } : undefined;
+      on_chain: row.status === "confirmed", paid: null } : undefined;
   }
   revoke(keyID: string): void {
     this.#db.prepare("INSERT OR IGNORE INTO observer_revocations_v0 VALUES (?, ?)").run(keyID, this.#clock());
@@ -213,6 +257,12 @@ export class ObservationPolicyService {
       if (counterEnabled) this.#db.prepare(`INSERT INTO observation_device_counters_v0 VALUES (?, ?)
         ON CONFLICT(device_id) DO UPDATE SET counter=excluded.counter`).run(device, t.challenges[2]!.deviceCounter);
       this.#db.prepare("INSERT INTO observation_validations_v0 VALUES (?, ?, ?, ?)").run(hash, digest, nullifier, now);
+      const pseudonym = Buffer.from(t.pseudonym).toString('hex');
+      const owner = this.#db.prepare('SELECT key_id FROM observation_payout_owners_v0 WHERE protocol=? AND pseudonym=?')
+        .get(this.#source.paymentScope ?? this.#source.target, pseudonym);
+      if (owner && owner.key_id !== envelope.key_id) reject('E_ASSERTION');
+      this.#db.prepare('INSERT OR IGNORE INTO observation_payout_owners_v0 VALUES (?, ?, ?)')
+        .run(this.#source.paymentScope ?? this.#source.target, pseudonym, envelope.key_id);
       if (relayPayload) {
         relayPayload.verifierSignature = this.#relay!.signer.sign(relayPayload);
         queueValidatedObservation(this.#db, relayPayload, this.#relay!.capacity);

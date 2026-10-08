@@ -1,5 +1,5 @@
 import { PublicKey, type AccountInfo } from "@solana/web3.js";
-import { DEVNET_USDC, deviceId, discriminator, registryAddresses } from "@pathnod/solana";
+import { DEVNET_USDC, TOKEN_PROGRAM, deviceId, discriminator, registryAddresses } from "@pathnod/solana";
 
 export function eligibilityAccounts() {
   const program = new PublicKey("5V9pXQN5dQkRBSTsaezBg6qLRC3mbLj21Ny3j7xtuHTd");
@@ -27,7 +27,11 @@ export function eligibilityAccounts() {
     data.writeUInt16LE(independent, 8); data[10] = paid;
     return account(data);
   };
-  return { program, protocol, device, config, deviceData, account, epochData, addresses,
-    rows: [account(config), account(deviceData), null] as (AccountInfo<Buffer> | null)[],
+  const settings = Buffer.alloc(106); discriminator('account','PaymentSettings').copy(settings);
+  program.toBuffer().copy(settings,8); DEVNET_USDC.toBuffer().copy(settings,40); program.toBuffer().copy(settings,72);
+  const escrow = Buffer.alloc(165); DEVNET_USDC.toBuffer().copy(escrow); addresses.config.toBuffer().copy(escrow,32);
+  escrow.writeBigUInt64LE(0xffff_ffff_ffff_ffffn,64); escrow[108]=1;
+  return { program, protocol, device, config, deviceData, account, epochData, addresses, settings, escrow,
+    rows: [account(config), account(deviceData), null, account(settings), {...account(escrow),owner:TOKEN_PROGRAM}] as (AccountInfo<Buffer> | null)[],
   };
 }

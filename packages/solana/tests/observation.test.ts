@@ -7,6 +7,7 @@ import {
   Keypair,
   PublicKey,
   Transaction,
+  TransactionMessage, VersionedTransaction, AddressLookupTableAccount,
 } from "@solana/web3.js";
 import {
   appendObservationTree,
@@ -50,7 +51,7 @@ test("DEV-35: compiled verification-key digest and independent full-tree vectors
     /count/,
   );
 });
-test("DEV-35: complete instruction uses the expected PDAs, proof order and 1207-byte packet", () => {
+test("DEV-36: payment instruction fits a signed v0 packet using lookup addresses", () => {
   const vector = fixture("dev35-proofs.json").vectors[0],
     transcript = fixture("transcript-v0.json").vectors[0];
   const payer = Keypair.fromSeed(Buffer.alloc(32, 9)),
@@ -93,8 +94,14 @@ test("DEV-35: complete instruction uses the expected PDAs, proof order and 1207-
     instruction,
   );
   transaction.sign(payer);
-  assert.equal(transaction.serialize().length, 1207);
-  assert.ok(transaction.verifySignatures());
+  assert.throws(()=>transaction.serialize(),/too large/);
+  const lookup = new AddressLookupTableAccount({ key:Keypair.generate().publicKey,state:{
+    deactivationSlot:0xffff_ffff_ffff_ffffn,lastExtendedSlot:1,lastExtendedSlotStartIndex:0,authority:undefined,
+    addresses:instruction.keys.filter(k=>!k.isSigner).map(k=>k.pubkey) } });
+  const versioned = new VersionedTransaction(new TransactionMessage({ payerKey:payer.publicKey,
+    recentBlockhash:PublicKey.default.toBase58(), instructions:transaction.instructions }).compileToV0Message([lookup]));
+  versioned.sign([payer]);
+  assert.ok(versioned.serialize().length <= 1232);
   const bad = Buffer.from(proof);
   bad.fill(255, 352, 384);
   assert.throws(
@@ -135,7 +142,7 @@ test("DEV-35: account layouts, canonical scalar fields and extended epoch fronti
   const info = Buffer.concat([
     discriminator("account", "ObservationVerifierInfo"),
     fromHex(DEFAULT_OBSERVATION_KEY_DIGEST),
-    Buffer.from([1, 7]),
+    Buffer.from([2, 7]),
   ]);
   assert.equal(
     decodeObservationVerifier(info).keyDigest,

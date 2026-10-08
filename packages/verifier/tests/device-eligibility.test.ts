@@ -5,7 +5,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PublicKey } from "@solana/web3.js";
-import { registryAddresses, UPGRADEABLE_LOADER } from "@pathnod/solana";
+import { registryAddresses, paymentAddresses, UPGRADEABLE_LOADER } from "@pathnod/solana";
 import { DeviceEligibilityService, EligibilityError, type EligibilityErrorCode } from "../src/device-eligibility.ts";
 import { createEnrollmentServer } from "../src/enrollment-http.ts";
 import { ObserverEnrollmentService } from "../src/observer-enrollment.ts";
@@ -70,11 +70,20 @@ test("protocol and epoch PDAs are isolated, with one snapshot per query", async 
   assert.ok(requests[0]![1]!.equals(f.addresses.device(f.device)));
   assert.ok(!requests[0]![2]!.equals(requests[1]![2]!));
   other.copy(f.config, 40); registryAddresses(f.program, other).escrow.toBuffer().copy(f.config, 153);
+  registryAddresses(f.program, other).config.toBuffer().copy(f.escrow,32);
   await service.slots(hex(f.device), "1", hex(other));
   assert.ok(!requests[2]![0]!.equals(requests[1]![0]!));
   assert.ok(!requests[2]![1]!.equals(requests[1]![1]!));
   assert.ok(!requests[2]![2]!.equals(requests[1]![2]!));
   assert.equal(requests.length, 3);
+});
+
+test('DEV-36 quotes net rewards and limits paid slots by escrow funding', async () => {
+  const f = fixture(); f.settings.writeUInt16LE(2000,104);
+  assert.equal((await f.slots()).reward,'0.04');
+  f.escrow.writeBigUInt64LE(50_000n,64); assert.equal((await f.slots()).open_slots,1);
+  f.escrow.writeBigUInt64LE(49_999n,64); assert.equal((await f.slots()).open_slots,0);
+  f.rows[4]!.owner=PublicKey.default; await assert.rejects(f.slots,errorCode('account_mismatch'));
 });
 
 test("wrong owners, discriminators, device keys, mints, escrow and inconsistent counters fail closed", async () => {
@@ -128,7 +137,7 @@ test("HTTP exposes eligibility without enrollment, rejects ambiguous queries and
   }
 });
 
-test("the production reader checks its deployment and uses confirmed getMultipleAccounts", async () => {
+test("the production reader checks its deployment and uses finalized getMultipleAccounts", async () => {
   const f = fixture(); let validProgram = true;
   const requests: { method: string; params: unknown[] }[] = [];
   const encoded = (row: typeof f.rows[number]) => row === null ? null : {
@@ -150,8 +159,9 @@ test("the production reader checks its deployment and uses confirmed getMultiple
     const service = await DeviceEligibilityService.open(endpoint, f.program.toBase58(), hex(f.protocol));
     assert.equal((await service.slots(hex(f.device), "42")).open_slots, 3);
     const call = requests.find(value => value.method === "getMultipleAccounts"); assert.ok(call);
-    assert.deepEqual(call.params, [[f.addresses.config, f.addresses.device(f.device), f.addresses.epoch(f.device, 42)].map(key => key.toBase58()),
-      { encoding: "base64", commitment: "confirmed" }]);
+    assert.deepEqual(call.params, [[f.addresses.config, f.addresses.device(f.device), f.addresses.epoch(f.device, 42),
+      paymentAddresses(f.program,f.protocol,Buffer.alloc(32)).settings,f.addresses.escrow].map(key => key.toBase58()),
+      { encoding: "base64", commitment: "finalized" }]);
     validProgram = false;
     await assert.rejects(() => DeviceEligibilityService.open(endpoint, f.program.toBase58(), hex(f.protocol)), errorCode("invalid_target"));
     await assert.rejects(() => DeviceEligibilityService.open("http://remote.example", f.program.toBase58(), hex(f.protocol)), errorCode("invalid_target"));

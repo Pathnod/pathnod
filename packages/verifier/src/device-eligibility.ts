@@ -1,6 +1,7 @@
 import { Connection, PublicKey, type AccountInfo } from "@solana/web3.js";
 import {
-  DEVNET_USDC, UPGRADEABLE_LOADER, decodeDevice, decodeDeviceEpoch, decodeProtocol, deviceId, registryAddresses,
+  DEVNET_USDC, TOKEN_PROGRAM, UPGRADEABLE_LOADER, decodeDevice, decodeDeviceEpoch, decodeProtocol, deviceId, registryAddresses,
+  paymentAddresses, decodePaymentSettings, splitReward,
 } from "@pathnod/solana";
 
 export type EligibilityErrorCode = "invalid_input" | "invalid_config" | "invalid_target" |
@@ -67,11 +68,11 @@ export class DeviceEligibilityService {
       throw new EligibilityError("invalid_target");
     }
     const connection = new Connection(rpc.href, {
-      commitment: "confirmed", disableRetryOnRateLimit: true,
+      commitment: "finalized", disableRetryOnRateLimit: true,
       fetch: (input, init) => fetch(input, { ...init, signal: AbortSignal.timeout(10_000) }),
     });
     const service = new DeviceEligibilityService({ read: async addresses => {
-      const result = await connection.getMultipleAccountsInfoAndContext(addresses, { commitment: "confirmed" });
+      const result = await connection.getMultipleAccountsInfoAndContext(addresses, { commitment: "finalized" });
       return result.value;
     } }, program, protocolID, mint);
     try {
@@ -96,9 +97,10 @@ export class DeviceEligibilityService {
     if (protocol.every(byte => byte === 0)) throw new EligibilityError("invalid_input");
     const addresses = registryAddresses(this.#program, protocol);
     let accounts: (AccountInfo<Buffer> | null)[];
-    try { accounts = await this.#reader.read([addresses.config, addresses.device(device), addresses.epoch(device, epoch)]); }
+    try { accounts = await this.#reader.read([addresses.config, addresses.device(device), addresses.epoch(device, epoch),
+      paymentAddresses(this.#program,protocol,Buffer.alloc(32)).settings, addresses.escrow]); }
     catch { throw new EligibilityError("rpc_unavailable"); }
-    if (accounts.length !== 3) throw new EligibilityError("rpc_unavailable");
+    if (accounts.length !== 5) throw new EligibilityError("rpc_unavailable");
     const [configAccount, deviceAccount, epochAccount] = accounts;
     if (configAccount === null) throw new EligibilityError("protocol_unknown");
     try {
@@ -121,9 +123,16 @@ export class DeviceEligibilityService {
           record.curve !== 1 || record.registeredAt <= 0n) throw Error();
       const state = epochAccount === null ? undefined : decodeDeviceEpoch(data(epochAccount));
       if (state && state.paidSlotsUsed > state.independentObservers) throw Error();
+      const settings = decodePaymentSettings(data(accounts[3]));
+      const escrow = accounts[4];
+      if (!settings.mint.equals(this.#rewardMint) || !escrow || escrow.executable ||
+          !escrow.owner.equals(TOKEN_PROGRAM) || escrow.data.length !== 165 || escrow.data[108] !== 1 ||
+          !new PublicKey(escrow.data.subarray(0,32)).equals(this.#rewardMint) ||
+          !new PublicKey(escrow.data.subarray(32,64)).equals(addresses.config)) throw Error();
+      const funded = config.rewardPerSlot > 0n ? escrow.data.readBigUInt64LE(64)/config.rewardPerSlot : 0n;
       return { slots: { registered: true, ...result,
-        open_slots: Math.max(0, config.slotsPerEpoch - (state?.paidSlotsUsed ?? 0)),
-        reward: decimalReward(config.rewardPerSlot),
+        open_slots: Number(funded < BigInt(Math.max(0, config.slotsPerEpoch - (state?.paidSlotsUsed ?? 0))) ? funded : BigInt(Math.max(0, config.slotsPerEpoch - (state?.paidSlotsUsed ?? 0)))),
+        reward: decimalReward(splitReward(config.rewardPerSlot,settings.feeBps).net),
       }, epochSeconds: config.epochSeconds };
     } catch { throw new EligibilityError("account_mismatch"); }
   }

@@ -9,6 +9,7 @@ struct ChallengeScanView: View {
         NavigationStack {
             List {
                 Section("Observation") {
+                    NavigationLink("Devnet gains and withdrawals") { EarningsView() }
                     NavigationLink("Observe a device") { ObservationSessionView(controller: controller) }
                     Text("Check eligibility, verify three signed replies, and collect a local session with your chosen signals.")
                         .font(.footnote).foregroundStyle(.secondary)

@@ -2,7 +2,9 @@ use crate::{
     authorization::observation_authorization_with_evidence_digest, registry::FIELD_MODULUS_BE,
     trusted_vk, DeviceRegistry, EnrollmentAuthority, ObserverRoot, PathnodError, ProtocolConfig,
 };
+use crate::{PaymentSettings, Payout};
 use anchor_lang::prelude::*;
+use anchor_spl::token::{self, Mint, Token, TokenAccount, TransferChecked};
 use groth16_solana::groth16::Groth16Verifier;
 use solana_instructions_sysvar::{load_current_index_checked, load_instruction_at_checked};
 use solana_poseidon::{hashv as poseidon, Endianness, Parameters};
@@ -65,7 +67,7 @@ pub struct DeviceEpoch {
 
 #[derive(Accounts)]
 pub struct InitializeObservationVerifier<'info> {
-    #[account(init, payer = authority, space = 8 + ObservationVerifierInfo::INIT_SPACE,
+    #[account(init_if_needed, payer = authority, space = 8 + ObservationVerifierInfo::INIT_SPACE,
         seeds = [b"observation-verifier"], bump)]
     pub verifier_info: Account<'info, ObservationVerifierInfo>,
     #[account(seeds = [b"enrollment-authority"], bump, has_one = authority @ PathnodError::Unauthorized)]
@@ -98,6 +100,24 @@ pub struct SubmitObservation<'info> {
     #[account(mut)]
     pub relayer: Signer<'info>,
     pub system_program: Program<'info, System>,
+    #[account(seeds = [b"payments"], bump, constraint = settings.mint == config.reward_mint @ PathnodError::InvalidMint)]
+    pub settings: Box<Account<'info, PaymentSettings>>,
+    #[account(address = config.reward_mint, constraint = mint.decimals == 6 @ PathnodError::InvalidMint)]
+    pub mint: Box<Account<'info, Mint>>,
+    #[account(mut, address = config.escrow_vault, seeds = [b"escrow", config.protocol_id.as_ref()], bump,
+        token::mint = mint, token::authority = config)]
+    pub escrow: Box<Account<'info, TokenAccount>>,
+    #[account(init_if_needed, payer = relayer, space = 8 + Payout::INIT_SPACE,
+        seeds = [b"payout", config.protocol_id.as_ref(), args.public_inputs[5].as_ref()], bump)]
+    pub payout: Box<Account<'info, Payout>>,
+    #[account(init_if_needed, payer = relayer,
+        seeds = [b"payout-vault", config.protocol_id.as_ref(), args.public_inputs[5].as_ref()], bump,
+        token::mint = mint, token::authority = payout)]
+    pub payout_vault: Box<Account<'info, TokenAccount>>,
+    #[account(mut, seeds = [b"fees"], bump, token::mint = mint,
+        constraint = fee_vault.owner == settings.treasury @ PathnodError::Unauthorized)]
+    pub fee_vault: Box<Account<'info, TokenAccount>>,
+    pub token_program: Program<'info, Token>,
 }
 
 pub fn handle_initialize_verifier(ctx: Context<InitializeObservationVerifier>) -> Result<()> {
@@ -105,7 +125,7 @@ pub fn handle_initialize_verifier(ctx: Context<InitializeObservationVerifier>) -
         .verifier_info
         .set_inner(ObservationVerifierInfo {
             key_digest: trusted_vk::KEY_DIGEST,
-            abi_version: 1,
+            abi_version: 2,
             public_inputs: 7,
         });
     Ok(())
@@ -132,14 +152,25 @@ fn check_authorization(
     verifier: &Pubkey,
     digest: &[u8; 32],
 ) -> Result<()> {
+    check_ed25519_authorization(
+        instructions,
+        verifier,
+        digest,
+        crate::instruction::SubmitObservation::DISCRIMINATOR,
+    )
+}
+
+pub(crate) fn check_ed25519_authorization(
+    instructions: &AccountInfo,
+    verifier: &Pubkey,
+    digest: &[u8; 32],
+    discriminator: &[u8],
+) -> Result<()> {
     let current = load_current_index_checked(instructions)? as usize;
     require!(current > 0, PathnodError::InvalidVerifierAuthorization);
     let consumer = load_instruction_at_checked(current, instructions)?;
     require!(
-        consumer.program_id == crate::ID
-            && consumer
-                .data
-                .starts_with(crate::instruction::SubmitObservation::DISCRIMINATOR),
+        consumer.program_id == crate::ID && consumer.data.starts_with(discriminator),
         PathnodError::InvalidVerifierAuthorization
     );
     let previous = load_instruction_at_checked(current - 1, instructions)?;
@@ -261,6 +292,67 @@ pub fn handle_submit(ctx: Context<SubmitObservation>, args: SubmitObservationArg
         .verify()
         .map_err(|_| error!(PathnodError::InvalidProof))?;
     append_observation(&mut ctx.accounts.device_epoch, &args.transcript_hash)?;
+    let payout = &mut ctx.accounts.payout;
+    if payout.mint == Pubkey::default() {
+        payout.protocol_id = ctx.accounts.config.protocol_id;
+        payout.pseudonym = args.public_inputs[5];
+        payout.mint = ctx.accounts.mint.key();
+    }
+    require!(
+        payout.protocol_id == ctx.accounts.config.protocol_id
+            && payout.pseudonym == args.public_inputs[5]
+            && payout.mint == ctx.accounts.mint.key(),
+        PathnodError::InvalidPayout
+    );
+    let gross = ctx.accounts.config.reward_per_slot;
+    let paid = gross > 0
+        && ctx.accounts.device_epoch.paid_slots_used < ctx.accounts.config.slots_per_epoch
+        && ctx.accounts.escrow.amount >= gross;
+    if paid {
+        let (fee, net) = crate::payments::split_reward(gross, ctx.accounts.settings.fee_bps)?;
+        let protocol = ctx.accounts.config.protocol_id;
+        let bump = [ctx.bumps.config];
+        let seeds: &[&[u8]] = &[b"protocol", &protocol, &bump];
+        for (amount, to) in [
+            (net, ctx.accounts.payout_vault.to_account_info()),
+            (fee, ctx.accounts.fee_vault.to_account_info()),
+        ] {
+            if amount > 0 {
+                token::transfer_checked(
+                    CpiContext::new_with_signer(
+                        ctx.accounts.token_program.key(),
+                        TransferChecked {
+                            from: ctx.accounts.escrow.to_account_info(),
+                            to,
+                            mint: ctx.accounts.mint.to_account_info(),
+                            authority: ctx.accounts.config.to_account_info(),
+                        },
+                        &[seeds],
+                    ),
+                    amount,
+                    6,
+                )?;
+            }
+        }
+        payout.gross = payout
+            .gross
+            .checked_add(gross)
+            .ok_or(PathnodError::PaymentOverflow)?;
+        payout.fees = payout
+            .fees
+            .checked_add(fee)
+            .ok_or(PathnodError::PaymentOverflow)?;
+        payout.available = payout
+            .available
+            .checked_add(net)
+            .ok_or(PathnodError::PaymentOverflow)?;
+        ctx.accounts.device_epoch.paid_slots_used = ctx
+            .accounts
+            .device_epoch
+            .paid_slots_used
+            .checked_add(1)
+            .ok_or(PathnodError::PaymentOverflow)?;
+    }
     ctx.accounts.commitment.set_inner(ObservationCommitment {
         protocol_id: ctx.accounts.config.protocol_id,
         device_id: ctx.accounts.device.device_id,
@@ -270,7 +362,7 @@ pub fn handle_submit(ctx: Context<SubmitObservation>, args: SubmitObservationArg
         class,
         transcript_hash: args.transcript_hash,
         evidence_hash: args.evidence_hash,
-        slot_paid: false,
+        slot_paid: paid,
         submitted_at: now,
     });
     Ok(())

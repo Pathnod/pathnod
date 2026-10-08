@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+        D10000000000000000000207 /* EarningsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D10000000000000000000107 /* EarningsView.swift */; };
 		D08000000000000000000062 /* PathnodDensityCore in Frameworks */ = {isa = PBXBuildFile; productRef = D08000000000000000000061 /* PathnodDensityCore */; };
 		D08000000000000000000064 /* PathnodDensityCore in Frameworks */ = {isa = PBXBuildFile; productRef = D08000000000000000000063 /* PathnodDensityCore */; };
 		D08000000000000000000200 /* PathnodDensityScanApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = D08000000000000000000100 /* PathnodDensityScanApp.swift */; };
@@ -49,6 +50,7 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+        D10000000000000000000107 /* EarningsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EarningsView.swift; sourceTree = "<group>"; };
 		D08000000000000000000020 /* PathnodDensityScan.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = PathnodDensityScan.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		D08000000000000000000021 /* PathnodDensityScanTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = PathnodDensityScanTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		D08000000000000000000100 /* PathnodDensityScanApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PathnodDensityScanApp.swift; sourceTree = "<group>"; };
@@ -169,6 +171,7 @@
 				D10000000000000000000103 /* ObserverEnrollmentView.swift */,
 				D10000000000000000000104 /* ObserverEnrollmentClient.swift */,
 				D10000000000000000000106 /* ObservationSessionView.swift */,
+                D10000000000000000000107 /* EarningsView.swift */,
 				D10000000000000000000105 /* ObservationSensors.swift */,
 			);
 			path = ChallengeScan;
@@ -359,6 +362,7 @@
 				D10000000000000000000203 /* ObserverEnrollmentView.swift in Sources */,
 				D10000000000000000000204 /* ObserverEnrollmentClient.swift in Sources */,
 				D10000000000000000000206 /* ObservationSessionView.swift in Sources */,
+                D10000000000000000000207 /* EarningsView.swift in Sources */,
 				D10000000000000000000205 /* ObservationSensors.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

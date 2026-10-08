@@ -1,5 +1,10 @@
 # DEV-35 — trusted observation registration
 
+DEV-36 extends this baseline with payment accounts, ABI 2 and lookup-table
+transactions. See [dev36-usdc-rewards.md](dev36-usdc-rewards.md) for the current
+deployment, migration, eligibility and withdrawal requirements. Historical
+DEV-35 unpaid-only reports below are not evidence of DEV-36 payments.
+
 `submit_observation` registers an observation only after the configured verifier's
 Ed25519 authorization and a seven-input Groth16 proof pass. Its relayer is any
 fee payer. The signing verifier and fee payer use separate keys.

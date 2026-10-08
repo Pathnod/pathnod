@@ -135,7 +135,7 @@ test("DEV-35: finalized commitment confirmation rejects mismatched fields, owner
     data: Buffer.concat([
       discriminator("account", "ObservationVerifierInfo"),
       bytes(DEFAULT_OBSERVATION_KEY_DIGEST),
-      Buffer.from([1, 7]),
+      Buffer.from([2, 7]),
     ]),
     owner: program,
     executable: false,
