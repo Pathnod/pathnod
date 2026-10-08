@@ -1,5 +1,8 @@
 # Pathnod
 
+For a fresh, resumable devnet demo, see the [DEV-37 bootstrap runbook](docs/dev37-reproducible-demo.md)
+(`make demo`, with explicit external configuration and documented prerequisites).
+
 Pathnod explores privacy-preserving observations of physical infrastructure,
 with registry and accounting on Solana.
 
