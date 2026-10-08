@@ -114,6 +114,27 @@ struct ObservationSessionView: View {
                 Button("Retry due observations") { Task { await submission.retry(serverURL: serverURL) } }
                     .disabled(submission.busy || serverURL.isEmpty)
             }
+            Section("Devnet confirmation") {
+                Text(submission.chainMessage).accessibilityIdentifier("observationChainStatus")
+                if let chain = submission.chainStatus, chain.onChain {
+                    LabeledContent("Independent observers", value: String(chain.independentObservers ?? 0))
+                    LabeledContent("Paid slots used", value: String(chain.paidSlotsUsed ?? 0))
+                    LabeledContent("Reward allocated", value: chain.paid == true ? "Yes" : "No")
+                    if chain.network == "devnet", let signature = chain.transactionSignature,
+                       let explorer = URL(string: "https://explorer.solana.com/tx/\(signature)?cluster=devnet") {
+                        Link("View finalized devnet transaction", destination: explorer)
+                    }
+                    if let duplicate = chain.duplicate {
+                        Text("Duplicate rejected on-chain: \(duplicate.error). Counters and rewards unchanged.")
+                            .accessibilityIdentifier("observationDuplicateRejected")
+                        if chain.network == "devnet", let url = URL(string: "https://explorer.solana.com/tx/\(duplicate.transactionSignature)?cluster=devnet") {
+                            Link("View rejected duplicate transaction", destination: url)
+                        }
+                    }
+                }
+                Button("Refresh chain confirmation") { Task { await submission.refreshChain(serverURL: serverURL) } }
+                    .disabled(submission.busy || serverURL.isEmpty)
+            }
         }
         .navigationTitle("Observe a device")
         .onDisappear { if controller.isRunning { controller.cancel() } }
@@ -184,8 +205,39 @@ private final class ObservationSubmissionModel: ObservableObject {
     @Published var pending = 0
     @Published var rejected = 0
     @Published var status = "Not sent."
+    @Published var chainStatus: ObservationChainStatus?
+    @Published var chainMessage = "No finalized observation checked yet."
     private var queue: ObservationOutbox?
     private var preparationTask: Task<Void, Never>?
+    private let bindingKey = "observationChainBindingsV0"
+
+    private func saveBinding(endpoint: URL, hash: String, capture: ObservationCapture) {
+        var bindings = UserDefaults.standard.dictionary(forKey: bindingKey) as? [String: [String: String]] ?? [:]
+        bindings[endpoint.absoluteString] = ["hash": hash, "protocol": capture.protocolID.hexString, "device": capture.deviceID.hexString]
+        UserDefaults.standard.set(bindings, forKey: bindingKey)
+    }
+    func refreshChain(serverURL: String) async {
+        chainStatus = nil
+        do {
+            let http = try client(serverURL)
+            let bindings = UserDefaults.standard.dictionary(forKey: bindingKey) as? [String: [String: String]] ?? [:]
+            guard let binding = bindings[http.endpoint.absoluteString], let hash = binding["hash"],
+                  let protocolID = binding["protocol"], let deviceID = binding["device"], let base = URL(string: serverURL) else {
+                chainMessage = "No observation saved for this service."; return
+            }
+            #if DEBUG
+            let allowLocal = true
+            #else
+            let allowLocal = false
+            #endif
+            let value = try await ObservationStatusClient(baseURL: base, allowLocalHTTP: allowLocal)
+                .read(hash: hash, protocolID: protocolID, deviceID: deviceID)
+            chainStatus = value
+            chainMessage = value.onChain
+                ? (value.network == "devnet" ? "Observation finalized on Solana devnet." : "Observation finalized on a local test validator.")
+                : (value.status == "failed" ? "Submission failed; no finalized observation was found." : "Waiting for finalized chain confirmation.")
+        } catch { chainMessage = "Chain confirmation unavailable. Refresh to check again." }
+    }
 
     private func outbox() throws -> ObservationOutbox {
         if let queue { return queue }
@@ -233,6 +285,7 @@ private final class ObservationSubmissionModel: ObservableObject {
             let enrollment = try await ObserverEnrollmentClient(serverURL: serverURL).refreshPath(commitment: "0x" + credential.commitmentHex)
             let transcript = try ObservationTranscript(capture: capture, credential: credential, enrollment: enrollment)
             let hash = try transcript.transcriptHash().hexString
+            saveBinding(endpoint: http.endpoint, hash: hash, capture: capture)
             if try queue.wasReceived(hash: hash, endpoint: http.endpoint) {
                 status = try queue.wasValidated(hash: hash, endpoint: http.endpoint)
                     ? "This observation was already policy-validated. This receipt does not confirm on-chain submission or payment."
@@ -251,6 +304,7 @@ private final class ObservationSubmissionModel: ObservableObject {
                     ? "Policy-validated by the verifier. This receipt does not confirm on-chain submission or payment."
                     : "Received by development verifier. Not policy-validated or paid."
             } else { status = "Queued; waiting for retry." }
+            await refreshChain(serverURL: serverURL)
             #endif
         } catch ObservationSubmissionError.proverUnavailable {
             status = "Mopro is not bundled in this build. Use the DEV-32 Mopro build; no fake proof or assertion was sent."
@@ -260,9 +314,11 @@ private final class ObservationSubmissionModel: ObservableObject {
         guard !busy else { return }; busy = true; defer { busy = false; refresh() }
         do {
             let queue = try outbox()
-            guard try !queue.entries().isEmpty else { return }
-            let count = try await queue.drain(client: client(serverURL))
-            if count > 0 { status = "\(count) receipt(s) confirmed. Validation status is stored per observation; no on-chain submission or payment." }
+            if try !queue.entries().isEmpty {
+                let count = try await queue.drain(client: client(serverURL))
+                if count > 0 { status = "\(count) policy receipt(s) confirmed. Refresh chain confirmation for finalized registration and reward allocation." }
+            }
+            await refreshChain(serverURL: serverURL)
         } catch { status = "Retry not confirmed; envelope retained locally: \(error.localizedDescription)" }
     }
 }

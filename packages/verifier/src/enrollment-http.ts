@@ -96,6 +96,10 @@ export function createEnrollmentServer(service: ObserverEnrollmentService, publi
         } else {
           send(response, 202, await inbox.receive(await body(request, ["transcript", "assertion", "key_id", "zk"], ["evidence"])));
         }
+      } else if (request.method === 'GET' && /^\/observations\/[a-f0-9]{64}\/status$/.test(url.pathname)) {
+        if (!policy || url.search) { send(response,503,{error:'observation_dependency_unavailable'}); return; }
+        const status = await policy.observationStatus(url.pathname.split('/')[2]!);
+        send(response,status ? 200 : 404,status ?? {error:'observation_unknown'});
       } else if (request.method === 'GET' && /^\/payouts\/[a-f0-9]{64}$/.test(url.pathname)) {
         if (!policy || url.search) { send(response,503,{ error:'payments_unavailable' }); return; }
         send(response,200,await policy.payout(url.pathname.split('/')[2]!));
@@ -204,7 +208,7 @@ async function main(): Promise<void> {
       observationPolicy = new ObservationPolicyService(db, {
         appID, environment, allowedValidationCategories: categories, allowedBundleVersions: versions,
       }, { target: policyTarget,
-        snapshot: t => source.snapshot(t), payout: p => source.payout(p),
+        snapshot: t => source.snapshot(t), observationStatus: p => source.observationStatus(p), payout: p => source.payout(p),
         paymentScope: source.paymentScope,
         claim: (p,k,d,e) => source.claim(p,k,d,e), prepareClaim: (a,v,s) => source.prepareClaim(a,v,s) }, proof,
       signer ? { relay: { signer } } : {});

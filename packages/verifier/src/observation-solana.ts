@@ -3,6 +3,7 @@ import { UPGRADEABLE_LOADER, activeRoots, decodeEnrollment, decodeProtocol, deco
   paymentAddresses, decodePayout, decodePaymentSettings, formatUSDC, TOKEN_PROGRAM, DEVNET_USDC, claimPayout, claimDigest, type ClaimAuthorization } from "@pathnod/solana";
 import { ObservationPolicyError, type ObservationPolicySource } from "./observation-policy.ts";
 import type { ObservationTranscript } from "./observation-transcript.ts";
+import { finalizedObservationStatus } from './observation-status.ts';
 
 export interface ObservationAccountReader {
   read(addresses: PublicKey[]): Promise<(AccountInfo<Buffer> | null)[]>;
@@ -62,6 +63,10 @@ export class SolanaObservationPolicySource implements ObservationPolicySource {
     if (payout && (!payout.protocol.equals(this.#protocol) || payout.pseudonym.toString('hex') !== pseudonym ||
         !payout.mint.equals(settings.mint))) throw Error('Payout binding mismatch');
     return { p,config,settings,payout };
+  }
+  observationStatus(payload: import('./observation-relay.ts').ObservationRelayPayload) {
+    return finalizedObservationStatus(this.#reader, this.#program, this.#protocol, payload,
+      this.paymentScope.split('/')[0] === 'EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG' ? 'devnet' : 'local-validator');
   }
   async payout(pseudonym: string) {
     const { p,config,settings,payout } = await this.#paymentState(pseudonym);

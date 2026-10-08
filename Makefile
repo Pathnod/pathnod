@@ -1,4 +1,4 @@
-.PHONY: demo demo-prepare demo-check demo-import-enrollment
+.PHONY: demo demo-prepare demo-check demo-import-enrollment gate2-check gate2-status gate2-replay gate2-report
 
 # Configuration, keys and generated artifacts must be outside the checkout.
 demo:
@@ -17,3 +17,7 @@ demo-check:
 demo-import-enrollment:
 	@test -n "$(DEMO_CONFIG)" || (echo 'Set DEMO_CONFIG=/absolute/path/config.json'; exit 1)
 	pnpm --filter @pathnod/verifier demo -- --config "$(DEMO_CONFIG)" --import-enrollment
+
+gate2-check gate2-status gate2-replay gate2-report:
+	@test -n "$(GATE2_CONFIG)" || (echo 'Set GATE2_CONFIG=/absolute/private/gate2.json'; exit 1)
+	pnpm --filter @pathnod/verifier gate2 -- --config "$(GATE2_CONFIG)" $(patsubst gate2-%,%,$@)
