@@ -149,8 +149,9 @@ export function sameGate2Accounting(
   before: Gate2Snapshot,
   after: Gate2Snapshot,
 ): boolean {
-  return (Object.keys(before) as (keyof Gate2Snapshot)[]).every(
-    (key) => before[key] === after[key],
+  const keys = Object.keys(before) as (keyof Gate2Snapshot)[];
+  return keys.length === Object.keys(after).length && keys.every(
+    key => Object.hasOwn(after, key) && before[key] === after[key],
   );
 }
 

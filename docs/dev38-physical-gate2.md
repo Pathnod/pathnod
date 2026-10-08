@@ -154,3 +154,29 @@ Automated validation: verifier typecheck/build, **81 passing verifier tests**
 Testing), and a signed build installed on the real iPhone. Account-binding tests
 use fixtures; the physical run and recording above use the actual device,
 Apple assertions, mobile proof and devnet transactions.
+
+### Journal recovery coverage
+
+The CLI and automated tests now use the same recovery function and atomic
+journal writer. Eleven additional tests use real private journal files and
+signed synthetic v0 transactions, with injected RPC responses for:
+
+- A lost broadcast response, followed by restart with delayed history visibility
+  and retransmission of the identical signed bytes while still valid.
+- Restart with a processed/confirmed transaction, waiting for finality without
+  rebroadcasting or replacing it because its blockhash has expired.
+- An already-finalized E_NULLIFIER rejection, recovered before any expiry check
+  and without rebroadcast, including another run from the rejected journal.
+- Prepared/submitted transactions that are expired with an ambiguous outcome,
+  preserving the journal and stopping before any send.
+
+The tests also cover polling timeout, an unexpected success/error/instruction,
+changed balances, an incomplete baseline and failure to persist before send.
+Account comparison requires matching keys as well as values, so missing baseline
+fields cannot bypass the unchanged-accounting check. These fault injections are
+automated infrastructure tests, not additional physical sessions.
+
+The updated verifier suite passes **92 tests** with the same two existing skips.
+The refactored CLI also recovered the original finalized devnet rejection with
+the same signature and unchanged accounting, without broadcasting a new
+transaction. The original hardware recording and its checksum are unchanged.

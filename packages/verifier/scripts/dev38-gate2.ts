@@ -4,15 +4,7 @@ import { createReadStream } from "node:fs";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { DatabaseSync } from "node:sqlite";
-import {
-  readFile,
-  writeFile,
-  rename,
-  mkdir,
-  open,
-  unlink,
-  stat,
-} from "node:fs/promises";
+import { readFile, mkdir, open, unlink, stat } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import {
@@ -38,12 +30,12 @@ import {
 } from "../src/observation-authorization.ts";
 import { PathnodObservationSubmissionAdapter } from "../src/observation-adapter.ts";
 import { signatureBase58 } from "../src/solana-observation-relay.ts";
+import { gate2Snapshot, sameGate2Accounting } from "../src/gate2-evidence.ts";
 import {
-  gate2Snapshot,
-  nullifierRejection,
-  sameGate2Accounting,
-  type Gate2Snapshot,
-} from "../src/gate2-evidence.ts";
+  recoverGate2Replay,
+  writeGate2Artifact as atomic,
+  type Gate2ReplayJournal as Replay,
+} from "../src/gate2-recovery.ts";
 import type { ObservationRelayPayload } from "../src/observation-relay.ts";
 
 const repo = fileURLToPath(new URL("../../..", import.meta.url));
@@ -56,27 +48,6 @@ type Config = {
   transcriptHash?: string;
   video?: string;
 };
-type Replay = {
-  version: 1;
-  target: string;
-  hash: string;
-  wire: string;
-  signature: string;
-  lastValidBlockHeight: number;
-  before: Gate2Snapshot;
-  after?: Gate2Snapshot;
-  state: "prepared" | "submitted" | "rejected";
-};
-async function atomic(file: string, value: unknown) {
-  const h = await open(file + ".next", "w", 0o600);
-  try {
-    await h.writeFile(JSON.stringify(value, null, 2) + "\n");
-    await h.sync();
-  } finally {
-    await h.close();
-  }
-  await rename(file + ".next", file);
-}
 function validateWire(
   wire: Buffer,
   payer: PublicKey,
@@ -353,61 +324,22 @@ async function main() {
         instructions,
       );
       assert.equal(signatureBase58(tx.signatures[0]!), replay.signature);
-      const status = (
-        await connection.getSignatureStatuses([replay.signature], {
-          searchTransactionHistory: true,
-        })
-      ).value[0];
-      if (!status) {
-        assert.ok(
-          (await connection.getBlockHeight("finalized")) <=
-            replay.lastValidBlockHeight,
-          "Expired ambiguous duplicate transaction: inspect history and journal; do not automatically replace it",
-        );
-        replay.state = "submitted";
-        await atomic(journalFile, replay);
-        assert.equal(
-          await connection.sendRawTransaction(
-            Buffer.from(replay.wire, "base64"),
-            { skipPreflight: true, maxRetries: 0 },
-          ),
-          replay.signature,
-        );
-      }
-      let rejected = false;
-      for (let attempt = 0; attempt < 45; attempt++) {
-        const result = (
-          await connection.getSignatureStatuses([replay.signature], {
-            searchTransactionHistory: true,
-          })
-        ).value[0];
-        if (result?.confirmationStatus === "finalized") {
-          assert.ok(
-            nullifierRejection(result.err),
-            "Duplicate did not fail with E_NULLIFIER",
-          );
-          assert.equal(
-            (result.err as { InstructionError: [number, unknown] })
-              .InstructionError[0],
-            2,
-          );
-          rejected = true;
-          break;
-        }
-        await pause(1000);
-      }
-      assert.ok(
-        rejected,
-        "Duplicate outcome remains ambiguous; resume the same journal later",
-      );
-      const after = await gate2Snapshot(connection, program, payload);
-      assert.ok(
-        sameGate2Accounting(replay.before, after),
-        "Accounting changed during the duplicate check; inspect before declaring Gate 2 passed",
-      );
-      replay.after = after;
-      replay.state = "rejected";
-      await atomic(journalFile, replay);
+      await recoverGate2Replay(replay, {
+        inspect: async (signature) =>
+          (
+            await connection.getSignatureStatuses([signature], {
+              searchTransactionHistory: true,
+            })
+          ).value[0] ?? null,
+        blockHeight: () => connection.getBlockHeight("finalized"),
+        send: (wire) =>
+          connection.sendRawTransaction(wire, {
+            skipPreflight: true,
+            maxRetries: 0,
+          }),
+        save: (journal) => atomic(journalFile, journal),
+        snapshot: () => gate2Snapshot(connection, program, payload),
+      });
       const runtime = new DatabaseSync(
         await privateFile(setting("PATHNOD_ENROLLMENT_DB"), repo),
       );
