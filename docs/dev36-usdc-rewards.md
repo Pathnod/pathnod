@@ -91,8 +91,19 @@ Loss of the withdrawal key or observer secret can make funds inaccessible.
 The phone verifies the claim digest, signature, accounts, instruction data and
 the exact Ed25519-plus-claim transaction before signing; it cannot sign arbitrary
 server-supplied transfers. It saves approved bytes before broadcasting and
-reuses them on retry. Refresh reads finalized accounting; submission alone is
-not displayed as a finalized withdrawal. Expired claims require a fresh quote.
+reuses them on retry. The saved withdrawal includes the exact signed wire,
+transaction signature and `lastValidBlockHeight`. Recovery checks signature
+history and finalized block height, then refreshes the finalized payout nonce.
+An advanced nonce completes reconciliation; an unresolved signature retains the
+saved transaction. A fresh withdrawal is allowed only after the old blockhash is
+provably expired and the finalized nonce is unchanged, even if its authorization
+still has time remaining. This requires a new quote/assertion and another explicit
+withdrawal action; the app does not replace or broadcast a new transaction silently.
+Authorization expiry alone never discards an ambiguous transaction. Older saved
+files without blockhash-validity metadata are preserved conservatively rather than
+automatically replaced; do not delete them to bypass reconciliation.
+Refresh reads finalized accounting; submission alone is not displayed as a
+finalized withdrawal.
 Release builds require HTTPS; redirects are rejected.
 Wallet ↔ pseudonym linkage is public in v0 and explicitly acknowledged in the UI.
 
