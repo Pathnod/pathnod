@@ -170,8 +170,9 @@ async function main() {
     },
   );
   await lock.writeFile(String(process.pid));
+  let db: DatabaseSync | undefined;
   try {
-    const db = new DatabaseSync(
+    db = new DatabaseSync(
       await privateFile(setting("PATHNOD_ENROLLMENT_DB"), repo),
       { readOnly: true },
     );
@@ -212,6 +213,7 @@ async function main() {
     await adapter.validateTarget(connection, program);
     if (action === "check") {
       db.close();
+      db = undefined;
       console.log(
         "Gate 2 configuration and circuit metadata match the hardware deployment.",
       );
@@ -241,6 +243,7 @@ async function main() {
     const job = jobs[0]!;
     const payload = JSON.parse(String(job.payload)) as ObservationRelayPayload;
     db.close();
+    db = undefined;
     assert.equal(payload.transcriptHash, job.transcript_hash);
     assert.ok(
       verifyAuthorization(payload, payload.verifier, payload.verifierSignature),
@@ -506,6 +509,7 @@ async function main() {
       "Gate 2 evidence written; recording remains private and outside Git.",
     );
   } finally {
+    db?.close();
     await lock.close();
     await unlink(path.join(directory, "run.lock"));
   }

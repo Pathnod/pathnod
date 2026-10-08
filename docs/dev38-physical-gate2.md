@@ -45,9 +45,12 @@ make gate2-check GATE2_CONFIG=/absolute/private/gate2.json
 ```
 
 The check validates the runtime target binding, cluster and circuit metadata.
-It sends no transactions. The DEV-36 and DEV-37 review corrections must be
-integrated before final physical validation; this task does not silently migrate
-their protected databases or replace a failed hardware step with fixtures.
+It sends no transactions. This implementation includes the merged DEV-36 and
+DEV-37 corrections. For an existing hardware bootstrap, run
+`make demo-import-enrollment DEMO_CONFIG=/absolute/private/demo.json`, then
+`make demo DEMO_CONFIG=/absolute/private/demo.json` to create the deployment's
+runtime database and regenerate its configuration. The importer preserves the
+source database and refuses to overwrite an existing runtime database.
 
 ## Raw recording
 
@@ -114,7 +117,40 @@ check cannot prove what was filmed.
 
 ## Validation record
 
-Automated tests cover finalized-account binding, pending/payment separation,
-untrusted owners, accounting changes and the required nullifier error. The
-physical run and recording are recorded separately once completed. Gate 2 must
-remain incomplete until the actual device run and raw internal video exist.
+Gate 2 was completed on 2026-10-08 using an iPhone 16 Pro, the physical ESP32-C3,
+Apple App Attest class 1 and the bundled mobile Mopro prover. The verifier used
+the DEV-37 hardware bootstrap and its imported runtime enrollment database.
+The recorded device ID is
+`2b52d036962219b5195412a33950044c747666eac5d9e88ddfa39dc613b049b8`.
+
+The raw take shows three verified device signatures, median RTT **48 ms**,
+six RSSI samples, collection duration **7.725 s** and total discovery/collection
+duration **8.679 s**. Location and motion were disabled. The current firmware's
+rate-limit waits remain visible; this run does not establish the spec's <5 s
+session target or the still-open DEV-22 quota/power-cut tests.
+
+- [Original observation, finalized successfully](https://explorer.solana.com/tx/3pdncWBm32MeE7WbWT47xATUggYVztNcYeyBdRnGbEQKFf3PyTkkShaZJJpCgk7PgGbQUCy1hDXantUt1sjox8NB?cluster=devnet).
+- [Duplicate, finalized with E_NULLIFIER / 6001 at submit instruction 2](https://explorer.solana.com/tx/5LdQte2GqvKUtTnrdsuVjF4PRmNsJvrsWRhB3aho1fe6prZMus5mrf2woqinRkqhEWuJTJmNhhTEFArwFLpvd3Cy?cluster=devnet).
+
+The independent-observer and paid-slot counts stayed at **1**. The commitment
+tree root stayed at
+`b8c54532cf7f23c1772c1895e570a69417a91ce4f961c5c8a12639f327dd1e56`.
+The gross reward was **0.05 devnet USDC**, fees **0.01**, available payout
+**0.04**, remaining escrow **0.10** and withdrawn amount **0**. The duplicate
+changed none of these account fields or token balances. Withdrawal was not
+included in this Gate 2 take. Running the replay command again recovered the same
+finalized failed transaction from the journal, without broadcasting a replacement
+or adding another credit.
+
+The internal recording is **166.641117 seconds**, **176,034,723 bytes**, with
+a 1206 × 2622 video stream. Its SHA-256 is
+`ac061e1c7f199ba58c87314d67f67e759eb8355f7ef8af858ad5f3cb45b63a00`.
+Visual inspection confirmed the collection results, finalized observation and
+on-screen duplicate rejection. The video, derived frames, full report, signed
+wire journal and runtime database remain outside Git.
+
+Automated validation: verifier typecheck/build, **81 passing verifier tests**
+(two existing skips), **156 passing Swift tests** (53 XCTest and 103 Swift
+Testing), and a signed build installed on the real iPhone. Account-binding tests
+use fixtures; the physical run and recording above use the actual device,
+Apple assertions, mobile proof and devnet transactions.
