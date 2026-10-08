@@ -15,6 +15,7 @@ import { DEVNET_USDC, TOKEN_PROGRAM, UPGRADEABLE_LOADER, registryAddresses, paym
 import { signatureBase58 } from '../src/solana-observation-relay.ts';
 import { demoTarget, digest, within, externalFile, privateFile, hardwareInfo, canonicalRoot,
   pendingDecision } from '../src/demo-safety.ts';
+import { demoRuntimeDatabase, importDemoEnrollment } from '../src/demo-enrollment-import.ts';
 
 const repo = await realpath(fileURLToPath(new URL('../../..',import.meta.url)));
 const sleep = (ms: number) => new Promise(resolve=>setTimeout(resolve,ms));
@@ -91,6 +92,13 @@ async function rootAndDevice(c: Config): Promise<Pick<Manifest,'root' | 'device'
     return {device,root:canonicalRoot(String(snapshot.root).replace(/^0x/,''),rows.length)};
   } finally {if(db.isTransaction)db.exec('ROLLBACK');db.close();}
 }
+async function prepareRuntime(c: Config, folder: string, inputs: Pick<Manifest,'root'|'device'>) {
+  assert.deepEqual(await rootAndDevice(c),inputs,'Source enrollment root/identity differs from prepared deployment');
+  const runtimeDatabase=demoRuntimeDatabase(folder);
+  await importDemoEnrollment(c.mode==='hardware'?c.enrollmentDatabase:undefined,runtimeDatabase,repo);
+  if(c.mode==='hardware')assert.deepEqual(await rootAndDevice({...c,enrollmentDatabase:runtimeDatabase}),inputs,
+    'Enrollment snapshot changed during preparation; no deployment performed');
+}
 async function prepare(c: Config, folder: string, configDigest: string) {
   const manifestFile=path.join(folder,'manifest.json');
   try { await stat(manifestFile);throw Error('Prepared run already exists; use make demo, or choose a new freshRun and empty stateDirectory'); }
@@ -99,6 +107,7 @@ async function prepare(c: Config, folder: string, configDigest: string) {
   try {await stat(path.join(folder,'program.json'));throw Error('Incomplete preparation exists; use a new empty state directory, preserve the old keys');}
   catch(e) {if((e as NodeJS.ErrnoException).code!=='ENOENT')throw e;}
   const versions=await tools(), wallet=await key(c.wallet), inputs=await rootAndDevice(c);
+  await prepareRuntime(c,folder,inputs);
   const artifacts: Record<string,string>={};
   for (const [name,file] of Object.entries({wasm:c.wasm,zkey:c.zkey,verificationKey:c.verificationKey})) {
     artifacts[name]=digest(await readFile(await externalFile(file,repo)));
@@ -151,7 +160,12 @@ async function run(c: Config, folder: string, fingerprint: string, check: boolea
   for(const [name,file] of Object.entries({wasm:c.wasm,zkey:c.zkey,verificationKey:c.verificationKey})) {
     assert.equal(digest(await readFile(await externalFile(file,repo))),manifest.artifacts[name],`Artifact changed: ${name}`);
   }
-  assert.deepEqual(await rootAndDevice(c),{device:manifest.device,root:manifest.root},'Hardware/enrollment input changed');
+  const runtimeDatabase=await privateFile(demoRuntimeDatabase(folder),repo).catch(error=>{
+    if((error as NodeJS.ErrnoException).code==='ENOENT')throw Error('Runtime database missing: run make demo-import-enrollment with the same DEMO_CONFIG; no redeployment required');
+    throw error;
+  });
+  assert.deepEqual(await rootAndDevice(c.mode==='hardware'?{...c,enrollmentDatabase:runtimeDatabase}:c),
+    {device:manifest.device,root:manifest.root},'Hardware/runtime enrollment input changed');
   const {rpc,local,expected}=demoTarget(c.rpc,c.localValidator,c.genesis);
   let last=0;
   const connection=new Connection(rpc.href,{commitment:'finalized',disableRetryOnRateLimit:true,fetch:async(input,init)=>{
@@ -332,14 +346,15 @@ async function run(c: Config, folder: string, fingerprint: string, check: boolea
       PATHNOD_OBSERVATION_VERIFIER_SIGNER:path.join(folder,'verifier.json'),PATHNOD_OBSERVATION_RELAYER_PAYER:c.wallet,PATHNOD_OBSERVATION_LOOKUP_TABLE:state.lookup,
       PATHNOD_ROOT_RPC_URL:c.rpc,PATHNOD_ROOT_PROGRAM_ID:manifest.program,PATHNOD_ROOT_SIGNER:c.wallet,
       PATHNOD_ELIGIBILITY_RPC_URL:c.rpc,PATHNOD_ELIGIBILITY_PROGRAM_ID:manifest.program,PATHNOD_ELIGIBILITY_PROTOCOL_ID:manifest.protocol,
-      PATHNOD_ELIGIBILITY_REWARD_MINT:mint.toBase58(),PATHNOD_ENROLLMENT_DB:c.enrollmentDatabase??path.join(folder,'real-enrollment.sqlite'),
+      PATHNOD_ELIGIBILITY_REWARD_MINT:mint.toBase58(),PATHNOD_ENROLLMENT_DB:runtimeDatabase,
       requiredManual:['PATHNOD_APP_ATTEST_APP_ID','PATHNOD_APP_ATTEST_ENVIRONMENT','PATHNOD_APP_ATTEST_CATEGORIES','iPhone reachable HTTPS verifier URL'],
       ios:{program:manifest.program,protocol:manifest.protocol,proverWASM:c.wasm,proverZkey:c.zkey}});
   }
 }
 async function main() {
   const args=process.argv.slice(2).filter(a=>a!=='--');
-  assert.ok(args[0]==='--config'&&args[1]&&args.length<=3&&(!args[2]||['--prepare','--check'].includes(args[2])),'Usage: --config /external/config.json [--prepare|--check]');
+  assert.ok(args[0]==='--config'&&args[1]&&args.length<=3&&(!args[2]||['--prepare','--check','--import-enrollment'].includes(args[2])),
+    'Usage: --config /external/config.json [--prepare|--check|--import-enrollment]');
   const configPath=await externalFile(args[1]!,repo), raw=await readFile(configPath), c=JSON.parse(raw.toString()) as Config;
   assert.ok(c.version===1&&/^[a-z0-9][a-z0-9-]{2,63}$/.test(c.freshRun)&&['fixture','hardware'].includes(c.mode),'Set an explicit unique freshRun and mode');
   demoTarget(c.rpc,c.localValidator,c.genesis);
@@ -353,6 +368,11 @@ async function main() {
       const unrelated=(await readdir(folder)).filter(name=>name!=='run.lock'&&path.join(folder,name)!==configPath);
       assert.equal(unrelated.length,0,'Use a dedicated empty preparation directory; existing files will not be overwritten');
       await prepare(c,folder,digest(raw));
+    } else if(args[2]==='--import-enrollment') {
+      const manifest:Manifest=await json(path.join(folder,'manifest.json'));
+      assert.equal(manifest.version,1);assert.equal(manifest.configDigest,digest(raw),'Use the original prepared configuration');
+      await prepareRuntime(c,folder,{device:manifest.device,root:manifest.root});
+      console.log('Private runtime import complete; source preserved, no chain writes. Run make demo with the same DEMO_CONFIG.');
     } else await run(c,folder,digest(raw),args[2]==='--check');
   } finally {await handle.close();await unlink(lock);}
 }
