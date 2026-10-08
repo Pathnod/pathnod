@@ -1,14 +1,6 @@
 import assert from "node:assert/strict";
 import { createPrivateKey, createPublicKey } from "node:crypto";
-import {
-  readFile,
-  writeFile,
-  mkdir,
-  open,
-  rename,
-  unlink,
-  stat,
-} from "node:fs/promises";
+import { readFile, mkdir, open, unlink, stat } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { DatabaseSync } from "node:sqlite";
@@ -43,6 +35,11 @@ import {
 } from "../src/confidence-store.ts";
 import { readConfidenceSnapshot } from "../src/confidence-chain.ts";
 import {
+  recoverConfidencePublication,
+  writeConfidenceArtifact as atomic,
+  type ConfidencePublicationJournal as Journal,
+} from "../src/confidence-recovery.ts";
+import {
   decodeObservationTranscript,
   observationTranscriptHash,
 } from "../src/observation-transcript.ts";
@@ -63,27 +60,6 @@ interface Config {
   transcriptOrder?: string[];
   importInputs?: string;
   localValidator?: boolean;
-}
-interface Journal {
-  version: 1;
-  target: string;
-  report: Awaited<ReturnType<typeof readConfidenceSnapshot>>["report"];
-  commitment: string;
-  previousCommitment: string;
-  signature: string;
-  wire: string;
-  lastValidBlockHeight: number;
-  state: "prepared" | "submitted" | "confirmed";
-}
-async function atomic(file: string, value: unknown) {
-  const handle = await open(file + ".next", "w", 0o600);
-  try {
-    await handle.writeFile(JSON.stringify(value, null, 2) + "\n");
-    await handle.sync();
-  } finally {
-    await handle.close();
-  }
-  await rename(file + ".next", file);
 }
 function authorization(journal: Journal): ConfidenceAuthorization {
   const s = journal.report.scope;
@@ -453,70 +429,46 @@ async function main() {
       digest,
       snapshot.config.verifier,
     );
-    const status = async () =>
-      (
-        await connection.getSignatureStatuses([journal!.signature], {
-          searchTransactionHistory: true,
-        })
-      ).value[0];
-    let result = await status();
-    if (!result && existing !== journal.commitment) {
-      assert.equal(
-        action,
-        "publish",
-        "Publication not yet found; resume with publish",
-      );
-      assert.equal(
-        existing,
-        journal.previousCommitment,
-        "Publication previous hash changed",
-      );
-      assert.ok(
-        (await connection.getBlockHeight("finalized")) <=
-          journal.lastValidBlockHeight,
-        "Expired ambiguous publication: inspect history; do not automatically replace the transaction",
-      );
-      journal.state = "submitted";
-      await atomic(journalFile, journal);
-      assert.equal(
-        await connection.sendRawTransaction(
-          Buffer.from(journal.wire, "base64"),
-          { skipPreflight: false, maxRetries: 0 },
-        ),
-        journal.signature,
-      );
-    }
-    for (let attempt = 0; attempt < 45; attempt++) {
-      result = await status();
-      if (result?.confirmationStatus === "finalized") break;
-      if (action === "status") break;
-      await pause(1000);
-    }
     assert.ok(
-      result?.confirmationStatus === "finalized" && result.err === null,
-      "Confidence transaction is not finalized successfully; preserve and reconcile the journal",
+      action === "publish" || action === "status" || action === "report",
     );
-    const row = await connection.getAccountInfo(
-      snapshot.addresses.deviceEpoch,
-      "finalized",
+    await recoverConfidencePublication(
+      journal,
+      {
+        inspect: async (signature) =>
+          (
+            await connection.getSignatureStatuses([signature], {
+              searchTransactionHistory: true,
+            })
+          ).value[0] ?? null,
+        blockHeight: () => connection.getBlockHeight("finalized"),
+        send: (wire) =>
+          connection.sendRawTransaction(wire, {
+            skipPreflight: false,
+            maxRetries: 0,
+          }),
+        save: (value) => atomic(journalFile, value),
+        snapshot: async () => {
+          const row = await connection.getAccountInfo(
+            snapshot.addresses.deviceEpoch,
+            "finalized",
+          );
+          assert.ok(row && !row.executable && row.owner.equals(program));
+          const state = decodeDeviceEpoch(row.data);
+          return {
+            commitment: state.confidenceCommitment.toString("hex"),
+            observationRoot: state.observationRoot.toString("hex"),
+            observerCount: state.independentObservers,
+            paidSlotsUsed: state.paidSlotsUsed,
+          };
+        },
+      },
+      {
+        action,
+        currentCommitment: existing,
+        paidSlotsUsed: snapshot.deviceEpoch.paidSlotsUsed,
+      },
     );
-    assert.ok(row && !row.executable && row.owner.equals(program));
-    const epochState = decodeDeviceEpoch(row.data);
-    assert.equal(
-      epochState.confidenceCommitment.toString("hex"),
-      journal.commitment,
-    );
-    assert.equal(
-      epochState.observationRoot.toString("hex"),
-      authorizationArgs.observationRoot,
-    );
-    assert.equal(
-      epochState.independentObservers,
-      authorizationArgs.observerCount,
-    );
-    assert.equal(epochState.paidSlotsUsed, snapshot.deviceEpoch.paidSlotsUsed);
-    journal.state = "confirmed";
-    await atomic(journalFile, journal);
     db.exec(
       "CREATE TABLE IF NOT EXISTS confidence_reports_v0 (device_id TEXT NOT NULL, epoch INTEGER NOT NULL, target TEXT NOT NULL, commitment TEXT NOT NULL, report TEXT NOT NULL, signature TEXT NOT NULL, PRIMARY KEY(device_id,epoch,target))",
     );

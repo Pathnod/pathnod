@@ -207,3 +207,27 @@ signature without a new broadcast. The production local HTTP endpoint returned
 `published` with the same hash, score and signature. Private phone captures,
 X25519 keys, encrypted inputs, databases, account snapshots and signed wire
 journals remain outside Git.
+
+### Publication recovery and HTTP contract coverage
+
+The publication CLI and nine automated recovery tests now share the same
+recovery function and atomic journal writer. Tests use private journal files
+and signed synthetic legacy transactions to cover lost broadcast responses,
+restart while pending, finalized recovery without rebroadcast and expired
+ambiguous prepared/submitted transactions. Additional cases cover timeout,
+failed execution, mismatched finalized state, persistence failure, changed
+previous commitments and missing signature history. A matching chain hash alone
+does not attach an unproven local transaction signature to the report.
+
+Seven HTTP integration tests start the production router and policy service
+against a real temporary SQLite database and controlled chain-state fixtures.
+They verify status codes, JSON bodies and no-store headers for published, stale,
+unknown and unavailable responses; policy rotation; observation invalidation;
+and malformed, repeated or unexpected epoch parameters. Invalid queries stop
+before any chain read. Private error details and input envelopes are not exposed.
+
+The combined verifier suite passes **120 tests**, with two existing skips.
+The refactored CLI recovered the real finalized publication with the same
+signature and hash, without another transaction. These fault-injection tests
+are infrastructure coverage; the physical Gate 2 provenance remains as recorded
+above.
