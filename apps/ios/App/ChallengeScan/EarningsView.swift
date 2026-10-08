@@ -109,12 +109,17 @@ struct EarningsView: View {
         let verifier: String
         let signature: String
         let message: String
+        let lastValidBlockHeight: UInt64
     }
     private struct Pending: Codable {
         let authorization: PayoutAuthorization
         let verifier: String
         let signature: Data
         let message: Data
+        // Optional only to decode pre-fix files without discarding an ambiguous outcome.
+        let wire: Data?
+        let transactionSignature: String?
+        let lastValidBlockHeight: UInt64?
     }
     private func withdraw() async throws {
         let id = try identity()
@@ -130,8 +135,9 @@ struct EarningsView: View {
         guard approved.authorization == quote, let message = Data(base64Encoded:approved.message), approved.signature.count == 128 else { throw PayoutError.invalidClaim }
         var signature = Data(); var index = approved.signature.startIndex
         for _ in 0..<64 { let end = approved.signature.index(index,offsetBy:2); guard let byte = UInt8(approved.signature[index..<end],radix:16) else { throw PayoutError.invalidClaim }; signature.append(byte); index = end }
-        let pending = Pending(authorization:quote,verifier:approved.verifier,signature:signature,message:message)
-        _ = try quote.signedWire(message:message,verifier:approved.verifier,signature:signature,privateKey:id.key,expectedProgram:program,now:UInt64(Date().timeIntervalSince1970))
+        let wire = try quote.signedWire(message:message,verifier:approved.verifier,signature:signature,privateKey:id.key,expectedProgram:program,now:UInt64(Date().timeIntervalSince1970))
+        let pending = Pending(authorization:quote,verifier:approved.verifier,signature:signature,message:message,
+            wire:wire,transactionSignature:SolanaBase58.encode(Data(wire[1..<65])),lastValidBlockHeight:approved.lastValidBlockHeight)
         try JSONEncoder().encode(pending).write(to:id.pending,options:[.atomic,.completeFileProtectionUnlessOpen])
         try await retrySaved()
     }
@@ -140,27 +146,65 @@ struct EarningsView: View {
         guard FileManager.default.fileExists(atPath:id.pending.path) else { status = "No saved withdrawal."; return }
         let pending = try JSONDecoder().decode(Pending.self,from:Data(contentsOf:id.pending))
         guard let balance, pending.authorization.program == program, pending.authorization.payout == balance.payout else { throw PayoutError.invalidClaim }
-        if let nonce = UInt64(balance.nonce), let previous = UInt64(pending.authorization.nonce), nonce > previous {
+        guard let initialNonce = UInt64(balance.nonce), let savedNonce = UInt64(pending.authorization.nonce), initialNonce >= savedNonce else { throw PayoutError.invalidBalance }
+        if balance.status == "finalized", initialNonce > savedNonce {
             try FileManager.default.removeItem(at:id.pending); status = "Withdrawal finalized; balances refreshed."; return
         }
         let now = UInt64(Date().timeIntervalSince1970)
-        if let expiry = UInt64(pending.authorization.expiresAt), expiry < now {
-            try FileManager.default.removeItem(at:id.pending); status = "Saved authorization expired. No withdrawal confirmed; refresh before a new claim."; return
+        // Reconstruct legacy bytes only while their authorization can still be validated.
+        let wire: Data
+        if let saved = pending.wire { wire = saved }
+        else { wire = try pending.authorization.signedWire(message:pending.message,verifier:pending.verifier,signature:pending.signature,
+            privateKey:id.key,expectedProgram:program,now:now) }
+        guard wire.count > 65, wire[0] == 1, Data(wire.dropFirst(65)) == pending.message,
+              id.key.publicKey.isValidSignature(Data(wire[1..<65]),for:pending.message) else { throw PayoutError.invalidClaim }
+        let signature = SolanaBase58.encode(Data(wire[1..<65]))
+        guard pending.transactionSignature == nil || pending.transactionSignature == signature else { throw PayoutError.invalidClaim }
+        let result = try await rpcRequest("getSignatureStatuses", params:[[signature],["searchTransactionHistory":true]])
+        guard let statuses = result as? [String:Any], let values = statuses["value"] as? [Any], values.count == 1 else { throw PayoutError.invalidClaim }
+        let transactionStatus: WithdrawalTransactionStatus
+        if values[0] is NSNull { transactionStatus = .absent }
+        else {
+            guard let value = values[0] as? [String:Any], let confirmation = value["confirmationStatus"] as? String,
+                  let error = value["err"], ["processed","confirmed","finalized"].contains(confirmation) else { throw PayoutError.invalidClaim }
+            transactionStatus = !(error is NSNull) ? .failed : confirmation == "finalized" ? .finalized : .pending
         }
-        let wire = try pending.authorization.signedWire(message:pending.message,verifier:pending.verifier,signature:pending.signature,
-            privateKey:id.key,expectedProgram:program,now:now)
+        guard let height = try await rpcRequest("getBlockHeight",params:[["commitment":"finalized"]]) as? NSNumber,
+              let finalizedHeight = UInt64(height.stringValue) else { throw PayoutError.invalidClaim }
+        // Read finalized payout state after the finalized expiry boundary, not before it.
+        try await refresh()
+        guard let current = self.balance, current.status == "finalized", current.payout == pending.authorization.payout,
+              let nonce = UInt64(current.nonce), let previous = UInt64(pending.authorization.nonce) else { throw PayoutError.invalidClaim }
+        switch try WithdrawalRecovery.action(status:transactionStatus,finalizedHeight:finalizedHeight,
+            lastValidBlockHeight:pending.lastValidBlockHeight,savedNonce:previous,finalizedNonce:nonce) {
+        case .completed:
+            try FileManager.default.removeItem(at:id.pending); status = "Withdrawal finalized; balances refreshed."; return
+        case .replace:
+            try FileManager.default.removeItem(at:id.pending)
+            status = "Previous transaction expired without advancing the finalized nonce. You may request a new withdrawal."; return
+        case .wait:
+            status = "Saved withdrawal outcome is unresolved. No replacement sent; refresh and reconcile again."; return
+        case .retry:
+            guard let expiry = UInt64(pending.authorization.expiresAt), expiry >= now else {
+                status = "Authorization expired; retaining the transaction until its outcome or blockhash expiry is reconciled."; return
+            }
+        }
+        guard let broadcast = try await rpcRequest("sendTransaction",params:[wire.base64EncodedString(),
+            ["encoding":"base64","skipPreflight":false,"preflightCommitment":"finalized","maxRetries":0]]) as? String,
+              broadcast == signature else { throw PayoutError.invalidClaim }
+        status = "Withdrawal submitted, not finalized. Refresh gains to confirm. Retry reuses the exact same bytes."
+    }
+    private func rpcRequest(_ method: String, params: [Any]) async throws -> Any {
         var req = URLRequest(url:rpc); req.httpMethod = "POST"; req.timeoutInterval = 15
         req.setValue("application/json",forHTTPHeaderField:"Content-Type")
-        req.httpBody = try JSONSerialization.data(withJSONObject:["jsonrpc":"2.0","id":1,"method":"sendTransaction",
-            "params":[wire.base64EncodedString(),["encoding":"base64","skipPreflight":false,"preflightCommitment":"finalized","maxRetries":0]]])
+        req.httpBody = try JSONSerialization.data(withJSONObject:["jsonrpc":"2.0","id":1,"method":method,"params":params])
         let session = URLSession(configuration:.ephemeral,delegate:NoPayoutRedirect(),delegateQueue:nil)
         defer { session.invalidateAndCancel() }
         let (data,response) = try await session.data(for:req)
         guard (response as? HTTPURLResponse)?.statusCode == 200, data.count <= 16384,
               let result = try JSONSerialization.jsonObject(with:data) as? [String:Any],
-              let signature = result["result"] as? String,
-              signature == SolanaBase58.encode(Data(wire[1..<65])) else { throw PayoutError.invalidClaim }
-        status = "Withdrawal submitted, not finalized. Refresh gains to confirm. Retry reuses the exact same bytes."
+              result["error"] == nil, let value = result["result"] else { throw PayoutError.invalidClaim }
+        return value
     }
 }
 

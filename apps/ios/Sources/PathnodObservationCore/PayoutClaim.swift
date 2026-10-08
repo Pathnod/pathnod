@@ -3,6 +3,24 @@ import Foundation
 
 public enum PayoutError: Error { case invalidClaim, untrustedMessage, invalidBalance }
 
+public enum WithdrawalTransactionStatus: Sendable { case absent, failed, pending, finalized }
+public enum WithdrawalRecoveryAction: Equatable, Sendable { case completed, retry, wait, replace }
+
+/// Replacement requires finalized block height AND a freshly reconciled payout nonce.
+/// Missing validity metadata (older saved withdrawals) never permits replacement.
+public enum WithdrawalRecovery {
+    public static func action(status: WithdrawalTransactionStatus, finalizedHeight: UInt64,
+                              lastValidBlockHeight: UInt64?, savedNonce: UInt64,
+                              finalizedNonce: UInt64) throws -> WithdrawalRecoveryAction {
+        guard finalizedNonce >= savedNonce else { throw PayoutError.invalidBalance }
+        if finalizedNonce > savedNonce { return .completed }
+        if status == .pending || status == .finalized { return .wait }
+        guard let boundary = lastValidBlockHeight else { return .wait }
+        if finalizedHeight > boundary { return .replace }
+        return status == .failed ? .wait : .retry
+    }
+}
+
 public struct PayoutBalance: Codable, Sendable {
     public let status: String
     public let network: String
