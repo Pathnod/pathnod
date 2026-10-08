@@ -28,6 +28,9 @@ DEV-38 owns the filmed physical end-to-end validation.
   verified enrollment SQLite database with its App Attest keys. The operator is
   responsible for the database's provenance; the bootstrap recomputes its tree
   and checks recorded attestation-key associations, **not** fresh Apple attestations.
+  Stop the old verifier before taking/transferring this private snapshot; do not
+  operate both instances concurrently with the same App Attest keys. The import
+  preserves counters/revocations as of that snapshot, not later source changes.
 - The wallet remains the deployment, enrollment, requester and treasury authority
   for this disposable demo only. Production role separation is out of scope.
 
@@ -74,6 +77,16 @@ to check compatibility with the WASM/public-input contract. Preparation sends no
 transactions. Its synthetic witness is always explicitly identified as an artifact
 check, even when hardware mode is selected.
 
+Preparation also creates a private `runtime-enrollment.sqlite` for the new
+deployment. Hardware mode imports an explicit allowlist of App Attest keys (with
+assertion counters, validation category and bundle version), enrollments, Merkle
+nodes/roots/events, revocations and device replay counters in one read snapshot.
+Old deployment bindings, validation receipts, payout owners, relay/publication
+jobs and outstanding challenges are not copied. The input is opened read-only;
+its operational history is never reset. Fixture runtime starts empty, without
+synthetic Apple keys or enrollments. Runtime imports are exclusive one-time
+operations: retries never overwrite an existing file or roll back its counters.
+
 `demo-check` checks tool pins, configuration/artifact hashes, genesis, mint and
 funding without sending transactions. `demo` repeats those checks before writing.
 The timed run includes preflight, deployment, finalized registry/payments/root
@@ -84,6 +97,8 @@ wallet funding and hardware/Apple provisioning are excluded prerequisites.
 
 - Resume an interrupted run with the **same** command/configuration. A fingerprint
   rejects changed config, wallet, hardware inputs, toolchain or artifact bytes.
+  After import, the runtime snapshot rather than the source database is used for
+  enrollment checks. Do not start the new verifier until setup has completed.
 - Signed setup transactions and their signatures are saved atomically **before**
   broadcast. Retry broadcasts identical bytes; pending/ambiguous confirmations halt
   rather than substitute a fresh transaction.
@@ -105,6 +120,15 @@ wallet funding and hardware/Apple provisioning are excluded prerequisites.
   it gets new program, verifier and protocol identities. No existing deployment is
   reset or closed automatically.
 
+For deployments prepared before runtime isolation was introduced, keep the
+original configuration, manifest, keys and transaction journal. Stop the old
+verifier, then run `make demo-import-enrollment DEMO_CONFIG=/absolute/private/demo-config.json`
+once, followed by `make demo` with the same config. Import checks the source
+root/device against the prepared manifest and sends no chain transactions; the
+subsequent verified resume does not redeploy or fund already-initialized accounts.
+If a runtime file already exists, or the source root has changed, this command
+halts for inspection; do not delete files or rewrite target markers to bypass it.
+
 ## Outputs and manual steps
 
 `report.json` is a public whitelist: cluster, genesis, program/protocol/device IDs,
@@ -121,6 +145,9 @@ Set its environment variables and complete the Apple app ID/environment/categori
 HTTPS reachability, iPhone provisioning and matching Mopro artifacts manually.
 The generated withdrawal UX still requires devnet SOL and a destination USDC
 token account owned by the phone's withdrawal key, as documented in DEV-36.
+`PATHNOD_ENROLLMENT_DB` always points to the dedicated runtime file, never the
+input database. Apple settings must match the imported keys. The runtime contains
+private enrollment records and must not be published with the public report.
 
 @kazai777: provide the full ESP32 INFO and the verified iPhone enrollment database
 if unavailable locally, then reproduce hardware-mode setup. Confirm the registered
@@ -163,3 +190,11 @@ passed. These infrastructure runs explicitly used synthetic device/enrollment
 fixtures and do not establish a physical end-to-end observation or withdrawal.
 The full INFO and verified physical iPhone enrollment database were not available
 locally; the documented hardware-mode reproduction remains pending with @kazai777.
+
+Runtime isolation regression uses a synthetic enrolled snapshot already bound to
+an older policy, relay and publisher target. The one-time recovery CLI succeeds
+without a wallet or build artifacts; imported services and the HTTP health endpoint
+start with fresh targets using mock chain transports. Source bytes, assertion
+counters, revocations and the enrollment tree are preserved; repeated imports
+refuse to overwrite the runtime. Hardware startup against a real devnet deployment
+must still be rechecked by @kazai777 after this change.
