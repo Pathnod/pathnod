@@ -44,6 +44,9 @@ docs/                architecture decisions and project notes
 DEV-35 adds trusted observation registration, a native commitment tree and the
 concrete durable relay adapter. See [the submission ABI and runbook](docs/dev35-submit-observation.md).
 
+DEV-38 adds finalized observation status in the iPhone app and the Gate 2
+duplicate/evidence commands. See [the physical Gate 2 runbook](docs/dev38-physical-gate2.md).
+
 ## Current status
 
 Pathnod is at an early development stage. The intended protocol above is not a

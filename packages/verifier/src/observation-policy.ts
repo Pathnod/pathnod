@@ -6,6 +6,7 @@ import { decodeObservationTranscript, type ObservationTranscript, type Transcrip
 import { ObservationSigner, relayProofBytes } from "./observation-authorization.ts";
 import { initializeObservationRelay, queueValidatedObservation, type ObservationRelayPayload } from "./observation-relay.ts";
 import { claimDigest, type ClaimAuthorization } from '@pathnod/solana';
+import type { ObservationChainStatus } from './observation-status.ts';
 
 export type ObservationPolicyCode = "E_DEVICE_UNKNOWN" | "E_DEV_SIG" | "E_DEV_COUNTER" | "E_RTT" |
   "E_EPOCH" | "E_ASSERTION" | "E_ZK" | "E_NULLIFIER" | "E_RSSI";
@@ -20,6 +21,7 @@ export interface ValidatedObservationReceipt {
 export interface ObservationPolicySource {
   readonly target: string;
   readonly paymentScope?: string;
+  observationStatus?(payload: ObservationRelayPayload): Promise<ObservationChainStatus>;
   payout?(pseudonym: string): Promise<Record<string, unknown>>;
   claim?(pseudonym: string, withdrawalKey: string, destination: string, expiresAt?: string): Promise<ClaimAuthorization>;
   prepareClaim?(authorization: ClaimAuthorization, verifier: string, signature: string): Promise<{ message: string; blockhash: string; lastValidBlockHeight: number }>;
@@ -100,6 +102,23 @@ export class ObservationPolicyService {
     }
   }
   close(): void { this.#db.close(); }
+  async observationStatus(hash: string) {
+    if (!/^[a-f0-9]{64}$/.test(hash)) throw Error('Invalid observation hash');
+    if (!this.#source.observationStatus) throw new ObservationPolicyError('observation_dependency_unavailable');
+    const row = this.#db.prepare('SELECT status, signature, payload FROM observation_relay_jobs WHERE transcript_hash=?').get(hash);
+    if (!row) return undefined;
+    try {
+      const payload = JSON.parse(String(row.payload)) as ObservationRelayPayload;
+      if (payload.transcriptHash !== hash) throw Error('Corrupt observation status record');
+      const chain = await this.#source.observationStatus(payload);
+      const replay = this.#db.prepare("SELECT name FROM sqlite_master WHERE name='gate2_replays_v0'").get()
+        ? this.#db.prepare('SELECT signature,error_code,unchanged FROM gate2_replays_v0 WHERE transcript_hash=?').get(hash) : undefined;
+      return { ...chain, transcript_hash: hash, status: chain.on_chain ? 'finalized' : String(row.status),
+        transaction_signature: chain.on_chain && row.status === 'confirmed' ? row.signature : null,
+        duplicate: chain.on_chain && replay?.error_code === 6001 && replay.unchanged === 1
+          ? {status:'rejected',error:'E_NULLIFIER',unchanged:true,transaction_signature:replay.signature} : null };
+    } catch { throw new ObservationPolicyError('observation_dependency_unavailable'); }
+  }
   async payout(pseudonym: string) {
     if (!this.#source.payout) throw new ObservationPolicyError('observation_dependency_unavailable');
     return this.#source.payout(pseudonym);
