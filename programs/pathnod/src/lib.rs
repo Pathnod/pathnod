@@ -16,12 +16,21 @@ mod trusted_vk;
 pub use observation::*;
 mod payments;
 pub use payments::*;
+mod confidence;
+pub use confidence::*;
 
 declare_id!("5V9pXQN5dQkRBSTsaezBg6qLRC3mbLj21Ny3j7xtuHTd");
 
 #[program]
 pub mod pathnod {
     use super::*;
+
+    pub fn publish_confidence(
+        ctx: Context<PublishConfidence>,
+        args: PublishConfidenceArgs,
+    ) -> Result<()> {
+        confidence::handle_publish(ctx, args)
+    }
 
     pub fn initialize_payments(ctx: Context<InitializePayments>) -> Result<()> {
         payments::handle_initialize_payments(ctx)
@@ -241,6 +250,8 @@ pub enum PathnodError {
     InvalidPayout,
     #[msg("Payment arithmetic overflow")]
     PaymentOverflow,
+    #[msg("Confidence calculation no longer matches the epoch state")]
+    StaleConfidence,
 }
 
 fn verify_proof(

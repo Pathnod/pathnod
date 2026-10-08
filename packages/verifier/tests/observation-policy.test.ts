@@ -17,6 +17,8 @@ import { SolanaObservationPolicySource } from "../src/observation-solana.ts";
 import { ObservationSigner, verifyAuthorization } from "../src/observation-authorization.ts";
 import type { ObservationRelayPayload } from "../src/observation-relay.ts";
 import { claimDigest, DEVNET_USDC } from '@pathnod/solana';
+import { ConfidenceRecorder, openConfidenceInput } from '../src/confidence-store.ts';
+import { confidenceCommitment } from '../src/confidence.ts';
 
 const vector = JSON.parse(readFileSync(new URL("../../../fixtures/observations/transcript-v0.json", import.meta.url), "utf8")).vectors[0];
 const policy = { appID: "U5MCCC24G5.xyz.pathnod.appattestspike", environment: "development", allowedValidationCategories: [3], allowedBundleVersions: [] } as const;
@@ -79,11 +81,48 @@ async function fixture(capacity = 100) {
       service = new ObservationPolicyService(path, policy, source, proof,
         { clock: () => now, capacity, relay: { signer, capacity: relayCapacity } });
     },
+    enableConfidence: (confidence: ConfidenceRecorder) => {
+      service.close();service=new ObservationPolicyService(path,policy,source,proof,{clock:()=>now,capacity,confidence});
+    },
     close: () => { service.close(); db.close(); enrollment.close(); gate.close(); rmSync(dir, { recursive: true, force: true }); } };
 }
 async function code(expected: string, action: Promise<unknown>) {
   await assert.rejects(action, (error: unknown) => error instanceof ObservationPolicyError && error.code === expected);
 }
+
+test('DEV-39 archives exactly one requester-encrypted input atomically with successful validation',async()=>{
+  const f=await fixture(),recipient=generateKeyPairSync('x25519');
+  try{
+    f.enableConfidence(new ConfidenceRecorder(recipient.publicKey));const body=f.envelope(),receipt=await f.service.receive(body);
+    const row=f.db.prepare('SELECT * FROM confidence_inputs_v0').get()!;
+    const input=openConfidenceInput(recipient.privateKey,String(row.target),String(row.transcript_hash),String(row.sealed));
+    assert.deepEqual(input,{transcript:body.transcript,reenrollmentCount:null});assert.ok(!String(row.sealed).includes(f.keyID));
+    assert.deepEqual(await f.service.receive(body),receipt);assert.equal(f.db.prepare('SELECT COUNT(*) n FROM confidence_inputs_v0').get()?.n,1);
+  }finally{f.close();}
+});
+test('DEV-39 archive failure rolls back counters and acceptance, allowing an unchanged retry',async()=>{
+  const f=await fixture(),recipient=generateKeyPairSync('x25519');
+  class FailingRecorder extends ConfidenceRecorder { override record(...args:Parameters<ConfidenceRecorder['record']>):void{super.record(...args);throw Error('archive unavailable');} }
+  try{
+    f.enableConfidence(new FailingRecorder(recipient.publicKey));const body=f.envelope();await assert.rejects(f.service.receive(body),/archive unavailable/);
+    assert.equal(f.db.prepare('SELECT counter FROM app_attest_keys').get()?.counter,0);
+    assert.equal(f.db.prepare('SELECT COUNT(*) n FROM observation_validations_v0').get()?.n,0);
+    assert.equal(f.db.prepare('SELECT COUNT(*) n FROM confidence_inputs_v0').get()?.n,0);
+    f.enableConfidence(new ConfidenceRecorder(recipient.publicKey));assert.equal((await f.service.receive(body)).status,'validated');
+  }finally{f.close();}
+});
+test('DEV-39 serves a report only while finalized hash, count, root and policy remain current',async()=>{
+  const f=await fixture(),device=Buffer.from(f.t.deviceID).toString('hex'),root='11'.repeat(32),report={scope:{deviceID:device,epoch:42,program:DEVNET_USDC.toBase58(),protocolID:Buffer.from(f.t.protocolID).toString('hex'),policyVersion:1,observationRoot:root,transcriptOrder:['22'.repeat(32)]}},hash=confidenceCommitment(report);
+  let state={program:report.scope.program,protocolID:report.scope.protocolID,policyVersion:1,observationRoot:root,observerCount:1,commitment:hash};
+  f.source.confidenceState=async()=>state;
+  try{
+    f.db.exec('CREATE TABLE confidence_reports_v0 (device_id TEXT,epoch INTEGER,target TEXT,commitment TEXT,report TEXT,signature TEXT)');
+    f.db.prepare('INSERT INTO confidence_reports_v0 VALUES (?,?,?,?,?,?)').run(device,42,f.source.target,hash,JSON.stringify(report),'public-test-signature');
+    assert.equal((await f.service.confidenceStatus(device,42))?.status,'published');
+    state={...state,policyVersion:2};assert.equal((await f.service.confidenceStatus(device,42))?.status,'stale');
+    state={...state,policyVersion:1,commitment:'00'.repeat(32)};assert.equal((await f.service.confidenceStatus(device,42))?.confidence,null);
+  }finally{f.close();}
+});
 
 test("DEV-34: only successful fresh validation atomically signs and queues one private-data-free job", async () => {
   const f = await fixture(), signer = new ObservationSigner(Buffer.alloc(32, 7));

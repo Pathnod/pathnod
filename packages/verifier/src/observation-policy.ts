@@ -7,6 +7,8 @@ import { ObservationSigner, relayProofBytes } from "./observation-authorization.
 import { initializeObservationRelay, queueValidatedObservation, type ObservationRelayPayload } from "./observation-relay.ts";
 import { claimDigest, type ClaimAuthorization } from '@pathnod/solana';
 import type { ObservationChainStatus } from './observation-status.ts';
+import type { ConfidenceRecorder } from './confidence-store.ts';
+import { confidenceCommitment } from './confidence.ts';
 
 export type ObservationPolicyCode = "E_DEVICE_UNKNOWN" | "E_DEV_SIG" | "E_DEV_COUNTER" | "E_RTT" |
   "E_EPOCH" | "E_ASSERTION" | "E_ZK" | "E_NULLIFIER" | "E_RSSI";
@@ -22,6 +24,8 @@ export interface ObservationPolicySource {
   readonly target: string;
   readonly paymentScope?: string;
   observationStatus?(payload: ObservationRelayPayload): Promise<ObservationChainStatus>;
+  confidenceState?(device: string, epoch: number): Promise<{ program:string; protocolID:string; policyVersion:number;
+    observationRoot:string; observerCount:number; commitment:string } | undefined>;
   payout?(pseudonym: string): Promise<Record<string, unknown>>;
   claim?(pseudonym: string, withdrawalKey: string, destination: string, expiresAt?: string): Promise<ClaimAuthorization>;
   prepareClaim?(authorization: ClaimAuthorization, verifier: string, signature: string): Promise<{ message: string; blockhash: string; lastValidBlockHeight: number }>;
@@ -62,14 +66,16 @@ export class ObservationPolicyService {
   readonly #clock: () => number;
   readonly #capacity: number;
   readonly #relay: { signer: ObservationSigner; capacity: number } | undefined;
+  readonly #confidence: ConfidenceRecorder | undefined;
   constructor(databasePath: string, policy: AppAttestPolicy, source: ObservationPolicySource,
     proof: ObservationProofVerifier, options: { clock?: () => number; capacity?: number;
-      relay?: { signer: ObservationSigner; capacity?: number } } = {}) {
+      relay?: { signer: ObservationSigner; capacity?: number }; confidence?: ConfidenceRecorder } = {}) {
     this.#capacity = options.capacity ?? 100_000;
     if (!source.target || !Number.isInteger(this.#capacity) || this.#capacity < 1 || this.#capacity > 1_000_000) {
       throw Error("Invalid observation policy configuration");
     }
     this.#source = source; this.#proof = proof; this.#clock = options.clock ?? Date.now;
+    this.#confidence = options.confidence;
     this.#attest = new AppAttestVerifier(policy); this.#db = new DatabaseSync(databasePath);
     this.#relay = options.relay ? { signer: options.relay.signer, capacity: options.relay.capacity ?? this.#capacity } : undefined;
     if (this.#relay && (!Number.isInteger(this.#relay.capacity) || this.#relay.capacity < 1 || this.#relay.capacity > 1_000_000)) {
@@ -100,8 +106,24 @@ export class ObservationPolicyService {
       try { initializeObservationRelay(this.#db, source.target, this.#relay.signer.publicKey); }
       catch (error) { this.#db.close(); throw error; }
     }
+    if(this.#confidence){try{this.#confidence.initialize(this.#db);}catch(error){this.#db.close();throw error;}}
   }
   close(): void { this.#db.close(); }
+  async confidenceStatus(device: string, epoch: number) {
+    if(!/^[a-f0-9]{64}$/.test(device)||!Number.isInteger(epoch)||epoch<0||epoch>0xffff_ffff)throw Error('Invalid confidence request');
+    if(!this.#source.confidenceState)throw new ObservationPolicyError('observation_dependency_unavailable');
+    if(!this.#db.prepare("SELECT name FROM sqlite_master WHERE name='confidence_reports_v0'").get())return undefined;
+    const row=this.#db.prepare('SELECT commitment,report,signature FROM confidence_reports_v0 WHERE device_id=? AND epoch=? AND target=?')
+      .get(device,epoch,this.#source.target);if(!row)return undefined;
+    try {
+      const report=JSON.parse(String(row.report)),chain=await this.#source.confidenceState(device,epoch);
+      if(confidenceCommitment(report)!==row.commitment || report.scope.deviceID!==device || report.scope.epoch!==epoch)throw Error('Corrupt confidence report');
+      if(!chain || chain.commitment!==row.commitment || chain.observationRoot!==report.scope.observationRoot ||
+          chain.observerCount!==report.scope.transcriptOrder.length || chain.policyVersion!==report.scope.policyVersion ||
+          chain.program!==report.scope.program || chain.protocolID!==report.scope.protocolID)return {status:'stale',commitment:null,confidence:null};
+      return {status:'published',commitment:row.commitment,confidence:report,transaction_signature:row.signature};
+    }catch{throw new ObservationPolicyError('observation_dependency_unavailable');}
+  }
   async observationStatus(hash: string) {
     if (!/^[a-f0-9]{64}$/.test(hash)) throw Error('Invalid observation hash');
     if (!this.#source.observationStatus) throw new ObservationPolicyError('observation_dependency_unavailable');
@@ -276,6 +298,8 @@ export class ObservationPolicyService {
       if (counterEnabled) this.#db.prepare(`INSERT INTO observation_device_counters_v0 VALUES (?, ?)
         ON CONFLICT(device_id) DO UPDATE SET counter=excluded.counter`).run(device, t.challenges[2]!.deviceCounter);
       this.#db.prepare("INSERT INTO observation_validations_v0 VALUES (?, ?, ?, ?)").run(hash, digest, nullifier, now);
+      this.#confidence?.record(this.#db,this.#source.target,hash,{transcript:envelope.transcript,
+        ...(envelope.evidence===undefined?{}:{evidence:envelope.evidence}),reenrollmentCount:null});
       const pseudonym = Buffer.from(t.pseudonym).toString('hex');
       const owner = this.#db.prepare('SELECT key_id FROM observation_payout_owners_v0 WHERE protocol=? AND pseudonym=?')
         .get(this.#source.paymentScope ?? this.#source.target, pseudonym);

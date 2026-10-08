@@ -40,7 +40,9 @@ import {
   appendObservationTree,
   DEFAULT_OBSERVATION_KEY_DIGEST,
   initializePayments, paymentAddresses, decodePayout, claimPayout, claimDigest, updatePolicy,
+  publishConfidence, confidenceAuthorizationDigest, type ConfidenceAuthorization,
 } from "@pathnod/solana";
+import { computeConfidence, confidenceCommitment } from '../src/confidence.ts';
 import { AppAttestGate } from "../src/app-attest-gate.ts";
 import { ObserverEnrollmentService } from "../src/observer-enrollment.ts";
 import { FakeEnrollmentGate } from "../tests/helpers/enrollment-gate.ts";
@@ -857,6 +859,27 @@ async function main() {
       assert.equal(state.paidSlotsUsed, payments ? 1 : 0);
       assert.equal(decodeObservationCommitment(record.data).slotPaid,payments && i===0);
       assert.ok(state.observationRoot.equals(expectedRoot));
+      assert.equal(state.confidenceCommitment.toString('hex'),'00'.repeat(32),'New observations invalidate previous confidence');
+      const confidenceInputs=bodies.map(b=>({transcript:b.transcript,reenrollmentCount:null,...(b.evidence===undefined?{}:{evidence:b.evidence})}));
+      const confidenceReport=computeConfidence({program:program.toBase58(),protocolID:protocol.toString('hex'),deviceID:device.toString('hex'),
+        epoch:42,policyVersion:1,epochSeconds,evaluatedAtMilliseconds:Date.now(),observationRoot:expectedRoot.toString('hex'),
+        transcriptOrder:payloads.map(p=>p.transcriptHash),claimedGeohash6:null},confidenceInputs);
+      const confidenceArgs:ConfidenceAuthorization={epoch:42,policyVersion:1,evaluatedAtMilliseconds:BigInt(confidenceReport.scope.evaluatedAtMilliseconds),
+        observationRoot:expectedRoot.toString('hex'),observerCount:i+1,previousCommitment:'00'.repeat(32),commitment:confidenceCommitment(confidenceReport)};
+      const confidenceEd=(a:ConfidenceAuthorization,key:ObservationSigner=signer)=>{
+        const hash=confidenceAuthorizationDigest(program,protocol,device,a);
+        return Ed25519Program.createInstructionWithPublicKey({publicKey:new PublicKey(key.publicKey).toBuffer(),message:hash,signature:Buffer.from(key.signClaimDigest(hash),'hex')});
+      };
+      await reject('confidence wrong verifier',[confidenceEd(confidenceArgs,new ObservationSigner(Buffer.alloc(32,8))),publishConfidence(program,protocol,device,confidenceArgs)],6112);
+      const staleConfidence={...confidenceArgs,observationRoot:'09'.repeat(32)};
+      await reject('confidence stale tree',[confidenceEd(staleConfidence),publishConfidence(program,protocol,device,staleConfidence)],6118);
+      const wrongPolicy={...confidenceArgs,policyVersion:2};
+      await reject('confidence wrong policy',[confidenceEd(wrongPolicy),publishConfidence(program,protocol,device,wrongPolicy)],6102);
+      await send(`publish_confidence_${i+1}`,[confidenceEd(confidenceArgs),publishConfidence(program,protocol,device,confidenceArgs)]);
+      const published=decodeDeviceEpoch((await connection.getAccountInfo(addresses.epoch(device,42),'finalized'))!.data);
+      assert.equal(published.confidenceCommitment.toString('hex'),confidenceArgs.commitment);
+      assert.equal(published.independentObservers,i+1);assert.equal(published.paidSlotsUsed,state.paidSlotsUsed);assert.deepEqual(published.observationRoot,expectedRoot);
+      await reject('confidence replay cannot overwrite current commitment',[confidenceEd(confidenceArgs),publishConfidence(program,protocol,device,confidenceArgs)],6118);
       await reject("duplicate nullifier", valid, 6001);
       const unchanged = decodeDeviceEpoch(
         (await connection.getAccountInfo(
@@ -973,6 +996,9 @@ async function main() {
       externalSubmissionReconciled: true,
       duplicatesRejected: true,
       signatureV1Evidence: true,
+      confidencePublicationTested: true,
+      staleConfidenceRejected: true,
+      confidenceInvalidatedOnNewObservation: true,
     };
     await mkdir(path.dirname(reportPath), { recursive: true });
     await writeFile(reportPath, JSON.stringify(report, null, 2) + "\n", {

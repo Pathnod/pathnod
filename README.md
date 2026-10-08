@@ -47,6 +47,9 @@ concrete durable relay adapter. See [the submission ABI and runbook](docs/dev35-
 DEV-38 adds finalized observation status in the iPhone app and the Gate 2
 duplicate/evidence commands. See [the physical Gate 2 runbook](docs/dev38-physical-gate2.md).
 
+DEV-39 adds auditable confidence vectors, requester-encrypted observation history
+and epoch confidence publication. See [the confidence policy and runbook](docs/dev39-confidence.md).
+
 ## Current status
 
 Pathnod is at an early development stage. The intended protocol above is not a

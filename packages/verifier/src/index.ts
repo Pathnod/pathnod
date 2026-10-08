@@ -30,6 +30,8 @@ export type { ObservationSubmissionAdapter } from "./solana-observation-relay.ts
 export type { AppAttestChallengePurpose, IssuedAppAttestChallenge, IssuedAppAttestTrial } from "./app-attest-gate.ts";
 
 export { AppAttestVerifier, AppAttestVerificationError } from "./app-attest.ts";
+export { computeConfidence, confidenceCommitment, canonicalConfidenceBytes, CONFIDENCE_POLICY_V0 } from './confidence.ts';
+export type { ConfidenceInput, ConfidenceScope } from './confidence.ts';
 export type {
   AppAttestEnvironment,
   AppAttestPolicy,

@@ -4,6 +4,7 @@ import { UPGRADEABLE_LOADER, activeRoots, decodeEnrollment, decodeProtocol, deco
 import { ObservationPolicyError, type ObservationPolicySource } from "./observation-policy.ts";
 import type { ObservationTranscript } from "./observation-transcript.ts";
 import { finalizedObservationStatus } from './observation-status.ts';
+import { observationAddresses, decodeDeviceEpoch } from '@pathnod/solana';
 
 export interface ObservationAccountReader {
   read(addresses: PublicKey[]): Promise<(AccountInfo<Buffer> | null)[]>;
@@ -67,6 +68,17 @@ export class SolanaObservationPolicySource implements ObservationPolicySource {
   observationStatus(payload: import('./observation-relay.ts').ObservationRelayPayload) {
     return finalizedObservationStatus(this.#reader, this.#program, this.#protocol, payload,
       this.paymentScope.split('/')[0] === 'EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG' ? 'devnet' : 'local-validator');
+  }
+  async confidenceState(device: string, epoch: number) {
+    const addresses=observationAddresses(this.#program,this.#protocol,Buffer.from(device,'hex'),epoch,Buffer.alloc(32));
+    const [config,record]=await this.#reader.read([addresses.config,addresses.deviceEpoch]);
+    if(!config||config.executable||!config.owner.equals(this.#program))throw Error('Untrusted confidence config');
+    const policy=decodeProtocol(config.data);if(!policy.protocolId.equals(this.#protocol))throw Error('Confidence protocol mismatch');
+    if(record===null)return undefined;
+    if(!record||record.executable||!record.owner.equals(this.#program))throw Error('Untrusted confidence epoch');
+    const state=decodeDeviceEpoch(record.data);
+    return {program:this.#program.toBase58(),protocolID:this.#protocol.toString('hex'),policyVersion:policy.policyVersion,
+      observationRoot:state.observationRoot.toString('hex'),observerCount:state.independentObservers,commitment:state.confidenceCommitment.toString('hex')};
   }
   async payout(pseudonym: string) {
     const { p,config,settings,payout } = await this.#paymentState(pseudonym);
