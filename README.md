@@ -50,6 +50,9 @@ duplicate/evidence commands. See [the physical Gate 2 runbook](docs/dev38-physic
 DEV-39 adds auditable confidence vectors, requester-encrypted observation history
 and epoch confidence publication. See [the confidence policy and runbook](docs/dev39-confidence.md).
 
+DEV-40 adds a separate read-only operator dashboard in `apps/dashboard`.
+See [configuration, safety limits and startup](docs/dev40-operator-dashboard.md).
+
 ## Current status
 
 Pathnod is at an early development stage. The intended protocol above is not a
