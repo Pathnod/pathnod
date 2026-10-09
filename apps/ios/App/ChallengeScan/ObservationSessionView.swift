@@ -164,7 +164,7 @@ struct ObservationSessionView: View {
 }
 
 @MainActor
-private struct ObservationAppAttester: ObservationAssertionProvider {
+struct ObservationAppAttester: ObservationAssertionProvider {
     let client = AppAttestClient(service: SystemAppAttestService(),
         store: KeychainAppAttestKeyStore(service: "xyz.pathnod.challengescan.appattest"))
     func assertion(for transcriptHash: Data) async throws -> (keyID: String, object: Data) {
@@ -174,7 +174,7 @@ private struct ObservationAppAttester: ObservationAssertionProvider {
 }
 
 @MainActor
-private struct ObservationMoproProver: ObservationProver {
+struct ObservationMoproProver: ObservationProver {
     func prove(_ witness: ObservationWitness) async throws -> ObservationZK {
         #if PATHNOD_MOPRO
         guard let zkey = Bundle.main.path(forResource: "observation_final", ofType: "zkey") else {

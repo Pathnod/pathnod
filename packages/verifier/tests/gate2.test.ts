@@ -15,6 +15,7 @@ import {
   gate2Snapshot,
   sameGate2Accounting,
   nullifierRejection,
+  observationAccountingSnapshot,
 } from "../src/gate2-evidence.ts";
 import type { ObservationRelayPayload } from "../src/observation-relay.ts";
 
@@ -144,6 +145,21 @@ function fixture() {
     },
   };
 }
+test('DEV-42 snapshots a paid observation in a multi-observer epoch while retaining Gate 2 count checks', async () => {
+  const f=fixture();
+  f.epoch.writeUInt16LE(3,8);f.epoch[10]=3;
+  let frontier: Buffer[]=Array.from({length:16},()=>Buffer.alloc(32));
+  for(let i=0;i<3;i++) {
+    const next=appendObservationTree(frontier,i,Buffer.from((i===0?'11':i===1?'22':'33').repeat(32),'hex'));
+    frontier=next.frontier;next.root.copy(f.epoch,11);
+  }
+  const state=await observationAccountingSnapshot(f.connection,f.program,f.payload);
+  assert.equal(state.independentObservers,3);assert.equal(state.paidSlotsUsed,3);
+  assert.equal(state.observationRoot,f.epoch.subarray(11,43).toString('hex'));
+  await assert.rejects(gate2Snapshot(f.connection,f.program,f.payload),/one paid/);
+  f.rows[1]!.owner=PublicKey.default;
+  await assert.rejects(observationAccountingSnapshot(f.connection,f.program,f.payload),/Untrusted/);
+});
 test("DEV-38 confirms the exact finalized commitment and never converts a policy receipt into chain/payment success", async () => {
   const f = fixture();
   let result = await finalizedObservationStatus(

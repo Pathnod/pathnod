@@ -17,6 +17,7 @@ import { loadObservationSigner, loadPrivateKeypair } from "./observation-authori
 import { PathnodObservationSubmissionAdapter } from './observation-adapter.ts';
 import { ObservationRelayer } from './observation-relay.ts';
 import { SolanaObservationRelayTransport } from './solana-observation-relay.ts';
+import { AttackReplayDemo, AttackReplayError } from './attack-replay.ts';
 
 const MAX_BODY = 128 * 1024;
 
@@ -59,7 +60,8 @@ function challenge(value: ReturnType<ObserverEnrollmentService["issueEnrollmentC
 }
 
 export function createEnrollmentServer(service: ObserverEnrollmentService, publisher?: ObserverRootPublisher,
-  eligibility?: DeviceEligibilityService, inbox?: DevelopmentObservationInbox, policy?: ObservationPolicyService): Server {
+  eligibility?: DeviceEligibilityService, inbox?: DevelopmentObservationInbox, policy?: ObservationPolicyService,
+  attackDemo?: AttackReplayDemo): Server {
   if (inbox && policy) throw Error("Development receipt and policy validation are mutually exclusive");
   let validating = 0;
   return createServer(async (request, response) => {
@@ -67,6 +69,22 @@ export function createEnrollmentServer(service: ObserverEnrollmentService, publi
       const url = new URL(request.url ?? "", "http://localhost");
       if (request.method === "GET" && url.pathname === "/health") {
         send(response, 200, { status: "ok" });
+      } else if (request.method === 'GET' && url.pathname === '/demo/attacks' && !url.search) {
+        send(response,200,{enabled:attackDemo!==undefined,network:'devnet'});
+      } else if (url.pathname.startsWith('/demo/attacks/')) {
+        if (!attackDemo) {send(response,404,{error:'demo_disabled'});return;}
+        if (url.search) throw new AttackReplayError('invalid_demo_request');
+        if (request.method === 'POST' && url.pathname === '/demo/attacks/challenge') {
+          const input=await body(request,['transcript_hash','key_id']);
+          if(Object.values(input).some(v=>typeof v!=='string'))throw new AttackReplayError('invalid_demo_request');
+          send(response,200,attackDemo.challenge(String(input.transcript_hash),String(input.key_id)));
+        } else if (request.method === 'POST' && url.pathname === '/demo/attacks/replay') {
+          const input=await body(request,['transcript_hash','key_id','challenge_id','assertion']);
+          if(Object.values(input).some(v=>typeof v!=='string'))throw new AttackReplayError('invalid_demo_request');
+          send(response,202,await attackDemo.replay(String(input.transcript_hash),String(input.key_id),String(input.challenge_id),object(input.assertion)));
+        } else if (request.method === 'GET' && /^\/demo\/attacks\/replay\/[a-f0-9]{64}$/.test(url.pathname)) {
+          send(response,200,await attackDemo.status(url.pathname.split('/').at(-1)!));
+        } else {send(response,404,{error:'not_found'});}
       } else if (request.method === "GET" && url.pathname === "/root") {
         send(response, 200, { ...service.root(), publication: publisher?.status() ?? { enabled: false } });
       } else if (/^\/devices\/[^/]+\/slots$/.test(url.pathname)) {
@@ -140,7 +158,9 @@ export function createEnrollmentServer(service: ObserverEnrollmentService, publi
         send(response, 404, { error: "not_found" });
       }
     } catch (error) {
-      if (error instanceof ObservationPolicyError) {
+      if (error instanceof AttackReplayError) {
+        send(response,error.code==='demo_owner_required'?403:error.code==='demo_busy'?429:400,{error:error.code});
+      } else if (error instanceof ObservationPolicyError) {
         send(response, error.code === "observation_dependency_unavailable" ? 503 : error.code === "observation_capacity" ? 507 : 422,
           { error: error.code });
       } else if (error instanceof ObservationInboxError) {
@@ -178,6 +198,8 @@ async function main(): Promise<void> {
   const observationProtocol = process.env.PATHNOD_OBSERVATION_PROTOCOL_ID;
   const verifierSigner = process.env.PATHNOD_OBSERVATION_VERIFIER_SIGNER;
   const relayerPayer = process.env.PATHNOD_OBSERVATION_RELAYER_PAYER;
+  const attackDirectory=process.env.PATHNOD_ATTACK_DEMO_DIRECTORY;
+  if(attackDirectory && (process.env.NODE_ENV==='production' || !relayerPayer))throw Error('Attack demo requires a development server and configured devnet relayer');
   const observationEnabled = [observationVK, observationSHA, observationRPC, observationProgram, observationProtocol].some(v => v !== undefined);
   if (observationEnabled && (receiptDB || !observationVK || !observationSHA || !observationRPC || !observationProgram || !observationProtocol)) {
     throw Error("Set all five PATHNOD_OBSERVATION_* required settings; do not enable the development receipt sink.");
@@ -206,6 +228,7 @@ async function main(): Promise<void> {
   let observationPolicy: ObservationPolicyService | undefined;
   let relayer: ObservationRelayer | undefined;
   let relayTimer: ReturnType<typeof setInterval> | undefined;
+  let attackDemo: AttackReplayDemo | undefined;
   try {
     if (observationEnabled) {
       const proof = new PinnedGroth16Verifier(observationVK!, observationSHA!);
@@ -232,6 +255,10 @@ async function main(): Promise<void> {
           await loadPrivateKeypair(relayerPayer), signer.publicKey, new PathnodObservationSubmissionAdapter(proof.keyDigest),
           process.env.PATHNOD_OBSERVATION_GENESIS,process.env.PATHNOD_OBSERVATION_LOOKUP_TABLE);
         relayer = new ObservationRelayer(db, policyTarget, signer.publicKey, transport);
+        if(attackDirectory) {
+          if(!process.env.PATHNOD_OBSERVATION_LOOKUP_TABLE)throw Error('Attack demo requires the observation lookup table');
+          attackDemo=await AttackReplayDemo.open(db,gate,transport,attackDirectory,policyTarget);
+        }
       }
     }
     const eligibilityRPC = process.env.PATHNOD_ELIGIBILITY_RPC_URL;
@@ -253,9 +280,9 @@ async function main(): Promise<void> {
       });
       publisher.start();
     }
-  } catch (error) { await relayer?.close(); observationPolicy?.close(); service.close(); gate.close(); throw error; }
+  } catch (error) { await attackDemo?.close(); await relayer?.close(); observationPolicy?.close(); service.close(); gate.close(); throw error; }
   const inbox = receiptDB ? new DevelopmentObservationInbox(receiptDB) : undefined;
-  const server = createEnrollmentServer(service, publisher, eligibility, inbox, observationPolicy);
+  const server = createEnrollmentServer(service, publisher, eligibility, inbox, observationPolicy,attackDemo);
   server.requestTimeout = 15_000;
   server.listen(port, host, () => { process.stdout.write(`Enrollment server listening on ${host}:${port}\n`); });
   if (relayer) {
@@ -268,7 +295,7 @@ async function main(): Promise<void> {
     closing = true;
     if (relayTimer) clearInterval(relayTimer);
     server.close(() => {
-      void (async () => { await relayer?.close(); await publisher?.close(); observationPolicy?.close(); inbox?.close(); service.close(); gate.close(); })();
+      void (async () => { await attackDemo?.close(); await relayer?.close(); await publisher?.close(); observationPolicy?.close(); inbox?.close(); service.close(); gate.close(); })();
     });
   };
   process.once("SIGINT", close);

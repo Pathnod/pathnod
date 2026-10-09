@@ -117,6 +117,27 @@ final class ObservationTranscriptTests: XCTestCase {
         }
     }
 
+    func testLatencySimulationPreservesSignedDeviceDataAndCredentialBindings() throws {
+        let vector = try XCTUnwrap(fixtures().vectors.first(where: { $0.capture != nil }))
+        let capture = try XCTUnwrap(vector.capture), enrollment = try XCTUnwrap(vector.enrollment)
+        let credential = try ObserverCredentialManager(store: TranscriptSecretStore(secret: hex(vector.secret))).loadOrCreate()
+        let original = try ObservationTranscript(capture: capture, credential: credential, enrollment: enrollment)
+        let delayed = try ObservationLatencySimulation.transcript(capture: capture, credential: credential, enrollment: enrollment)
+        XCTAssertGreaterThan(delayed.challenges.map(\.roundTripMilliseconds).sorted()[1], 400)
+        var normalized = delayed
+        for index in normalized.challenges.indices {
+            normalized.challenges[index].roundTripMilliseconds -= 600
+        }
+        XCTAssertEqual(normalized, original)
+        XCTAssertEqual(try ObservationTranscript.decode(delayed.encode()), delayed)
+        XCTAssertNoThrow(try capture.validate())
+        let witness = try ObservationWitness(transcript: delayed, credential: credential, enrollment: enrollment)
+        XCTAssertEqual(witness.publicInputs, try ObservationWitness(transcript: original, credential: credential, enrollment: enrollment).publicInputs)
+        var otherSecret = try hex(vector.secret); otherSecret[0] ^= 1
+        let other = try ObserverCredentialManager(store: TranscriptSecretStore(secret: otherSecret)).loadOrCreate()
+        XCTAssertThrowsError(try ObservationLatencySimulation.transcript(capture: capture, credential: other, enrollment: enrollment))
+    }
+
     func testMalformedLengthsVersionTrailingDataAndFieldsFailClosed() throws {
         let vector = try XCTUnwrap(fixtures().vectors.first), bytes = try hex(vector.bytes)
         for count in 0..<bytes.count { XCTAssertThrowsError(try ObservationTranscript.decode(bytes.prefix(count))) }

@@ -23,6 +23,12 @@ struct ChallengeScanView: View {
                         .foregroundStyle(.secondary)
                 }
 
+                #if DEBUG
+                Section("Development demonstration") {
+                    NavigationLink("Attack rejection demo") { AttackDemoView(controller: controller) }
+                }
+                #endif
+
                 Section("S1 development test") {
                     Text("Connect to a Pathnod development device (ESP32 firmware or macOS simulator) and verify three signed Bluetooth challenges on this device.")
                     Text("Keep this app open during the test. Challenges are spaced by more than two seconds to respect the device rate limit; that wait is not part of the RTT. This is a protocol and timing check, not proof of physical presence or distance.")
