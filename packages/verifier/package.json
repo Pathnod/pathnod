@@ -31,7 +31,8 @@
     "eligibility:verify": "node scripts/dev29-eligibility.ts",
     "observations:verify": "node scripts/dev35-submit.ts",
     "demo": "node scripts/dev37-demo.ts",
-    "gate2": "node scripts/dev38-gate2.ts"
+    "gate2": "node scripts/dev38-gate2.ts",
+    "confidence": "node scripts/dev39-confidence.ts"
   },
   "dependencies": {
     "@pathnod/solana": "workspace:*",

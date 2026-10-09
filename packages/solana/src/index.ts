@@ -210,3 +210,5 @@ export function activeRoots(state: ReturnType<typeof decodeEnrollment>): Buffer[
   const count = Number(state.publications < 4n ? state.publications : 4n);
   return Array.from({ length: count }, (_, i) => state.recentRoots[Number((state.publications - 1n - BigInt(i)) % 4n)]!);
 }
+
+export { confidenceAuthorizationBytes, confidenceAuthorizationDigest, publishConfidence, type ConfidenceAuthorization } from './confidence.ts';

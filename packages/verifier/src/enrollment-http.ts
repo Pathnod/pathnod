@@ -1,5 +1,8 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { pathToFileURL } from "node:url";
+import { readFile, stat } from 'node:fs/promises';
+import { createPublicKey } from 'node:crypto';
+import { ConfidenceRecorder } from './confidence-store.ts';
 
 import { AppAttestGate } from "./app-attest-gate.ts";
 import { EnrollmentError, ObserverEnrollmentService } from "./observer-enrollment.ts";
@@ -80,6 +83,12 @@ export function createEnrollmentServer(service: ObserverEnrollmentService, publi
           response.setHeader("x-pathnod-epoch-seconds", String(quote.epochSeconds));
           send(response, 200, quote.slots);
         }
+      } else if(request.method==='GET' && /^\/devices\/[a-f0-9]{64}\/confidence$/.test(url.pathname)) {
+        const epoch=url.searchParams.get('epoch');
+        if([...url.searchParams.keys()].some(k=>k!=='epoch')||url.searchParams.getAll('epoch').length!==1||!epoch||!/^(0|[1-9][0-9]*)$/.test(epoch)||BigInt(epoch)>0xffff_ffffn)throw new EligibilityError('invalid_input');
+        if(!policy){send(response,503,{error:'observation_dependency_unavailable'});return;}
+        const confidence=await policy.confidenceStatus(url.pathname.split('/')[2]!,Number(epoch));
+        send(response,confidence?200:404,confidence??{error:'confidence_unknown'});
       } else if (url.pathname === "/observations") {
         if (request.method !== "POST") {
           response.setHeader("allow", "POST"); send(response, 405, { error: "method_not_allowed" });
@@ -204,14 +213,20 @@ async function main(): Promise<void> {
         Number(process.env.PATHNOD_OBSERVATION_MINIMUM_RSSI ?? "-90"), Number(process.env.PATHNOD_OBSERVATION_POLICY_VERSION ?? "1"),
         process.env.PATHNOD_OBSERVATION_GENESIS, verifierSigner ? proof.keyDigest : undefined);
       const signer = verifierSigner ? await loadObservationSigner(verifierSigner) : undefined;
+      const recipientPath = process.env.PATHNOD_CONFIDENCE_RECIPIENT;
+      let confidence: ConfidenceRecorder | undefined;
+      if(recipientPath){
+        const info=await stat(recipientPath); if(!info.isFile() || info.size>4096)throw Error('Invalid confidence recipient key file');
+        confidence=new ConfidenceRecorder(createPublicKey(await readFile(recipientPath)));
+      }
       const policyTarget = `${source.target}/${proof.digest}/${appID}/${environment}/${categories.join(",")}/${versions.join(",")}`;
       observationPolicy = new ObservationPolicyService(db, {
         appID, environment, allowedValidationCategories: categories, allowedBundleVersions: versions,
       }, { target: policyTarget,
-        snapshot: t => source.snapshot(t), observationStatus: p => source.observationStatus(p), payout: p => source.payout(p),
+        snapshot: t => source.snapshot(t), observationStatus: p => source.observationStatus(p), confidenceState:(d,e)=>source.confidenceState(d,e), payout: p => source.payout(p),
         paymentScope: source.paymentScope,
         claim: (p,k,d,e) => source.claim(p,k,d,e), prepareClaim: (a,v,s) => source.prepareClaim(a,v,s) }, proof,
-      signer ? { relay: { signer } } : {});
+      { ...(signer ? { relay: { signer } } : {}), ...(confidence ? { confidence } : {}) });
       if (relayerPayer && signer) {
         const transport = await SolanaObservationRelayTransport.open(observationRPC!, observationProgram!, observationProtocol!,
           await loadPrivateKeypair(relayerPayer), signer.publicKey, new PathnodObservationSubmissionAdapter(proof.keyDigest),

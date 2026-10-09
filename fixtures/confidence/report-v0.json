@@ -1,0 +1,93 @@
+{
+  "publicSyntheticTests": true,
+  "description": "Scoring and canonical-report vector derived from the public DEV-31 transcript fixture; not hardware evidence.",
+  "scope": {
+    "program": "5V9pXQN5dQkRBSTsaezBg6qLRC3mbLj21Ny3j7xtuHTd",
+    "protocolID": "94dbccc702b0e27dd973268675962993b99dcd33d44696bb9118f8a17858107b",
+    "deviceID": "9f0e200de814e04d8f799dcd6f0c1aa214be76749bdda444d73f06ee769b4c11",
+    "epoch": 42,
+    "policyVersion": 1,
+    "epochSeconds": 60,
+    "evaluatedAtMilliseconds": 2551234,
+    "observationRoot": "12dca8658baccecb14c1dcca8789c76801ddab7557fd5145991ef4511ebcc04b",
+    "transcriptOrder": [
+      "dcae6192773065c62aefaec026d6eeda050ffb53b0aace0fc68cb09a89ffd113"
+    ],
+    "claimedGeohash6": null
+  },
+  "inputs": [
+    {
+      "transcript": "AJTbzMcCsOJ92XMmhnWWKZO5nc0z1EaWu5EY+KF4WBB7nw4gDegU4E2PeZ3NbwwaohS+dnSb3aRE1z8G7nabTBEWW58YU3yiMExbuDYt99rLAQkOEhLcaPPLXeEhInyDLgEqAAAAkngmAAAAAAADAAAAiz3AQ2DbEHiOhPKCxQHGtB4TVQzYHWJ6gJoBD8SLnQgCrNSvv9Ukcm2relHa7zUKLJI275vGpKnjIPq9mChZnbbeaA3mG6RWNfF4EQ3db4L8VftRIjyFkAmaTnxU3NkN6AMAAAAAAAABAAAAKADEVFKTWxbA1O12NWNr42U/wlD1uws2LAeRRta2q4RZNGc3GjEhdsqARhse3Dk9n/3rhp6P539EtHT7StvAJo8Tuk8ePKFls/DK8t27VrLxVMPN0nsbffKE09FI5l3cc+AF6QMAAAAAAAACAAAAKQDDK55tSd7pbE+EBtdrQ4qIhL2YaRWt5r89IFvR8CR/tjSUK3/JqQhk/umdXwYBzqiwpi6htXwYw4NS6n9kgGm/zjG265gguw67ocVBeqJGGoXmz1JuQATbUp049pCLcgsE6gMAAAAAAAADAAAAKgDCAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAUAAADEw8LBwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACJjEAPbibcTJQ5zbHKmEoz5OU/eV2qGKn0PIWy46L8sFe8zUMQ04junIbkVWF6zg6iYjwejq/9l+YjSNI3dIJgE=",
+      "reenrollmentCount": null
+    }
+  ],
+  "report": {
+    "version": 1,
+    "policy": {
+      "version": 1,
+      "scale": 10000,
+      "historyWindowMilliseconds": 2592000000,
+      "witnessTarget": 3,
+      "unknownDeployerWeightBps": 2000,
+      "cooccurrenceThresholdBps": 8000,
+      "spatialMinimumWitnesses": 3,
+      "spatialCapBps": 5000,
+      "gpsAccuracyLimitMeters": 1000,
+      "entropyTargetCategories": 4,
+      "evidencePresenceBps": 2500,
+      "maximumHistoryRecords": 10000,
+      "maximumHistoryPseudonyms": 512,
+      "hardwareClassBps": [
+        0,
+        10000,
+        10000,
+        8000
+      ],
+      "weights": [
+        2500,
+        1000,
+        3000,
+        1500,
+        1500,
+        500
+      ]
+    },
+    "scope": {
+      "program": "5V9pXQN5dQkRBSTsaezBg6qLRC3mbLj21Ny3j7xtuHTd",
+      "protocolID": "94dbccc702b0e27dd973268675962993b99dcd33d44696bb9118f8a17858107b",
+      "deviceID": "9f0e200de814e04d8f799dcd6f0c1aa214be76749bdda444d73f06ee769b4c11",
+      "epoch": 42,
+      "policyVersion": 1,
+      "epochSeconds": 60,
+      "evaluatedAtMilliseconds": 2551234,
+      "observationRoot": "12dca8658baccecb14c1dcca8789c76801ddab7557fd5145991ef4511ebcc04b",
+      "transcriptOrder": [
+        "dcae6192773065c62aefaec026d6eeda050ffb53b0aace0fc68cb09a89ffd113"
+      ],
+      "claimedGeohash6": null
+    },
+    "inputsHash": "009ede33b1b516a44c5560a2c6ae13a72361423c7fc23534e7cd78de44cd7d75",
+    "facets": {
+      "hardware_confidence": 10000,
+      "temporal_freshness": 5000,
+      "witness_diversity": 666,
+      "spatial_consistency": 0,
+      "behavior_diversity": 0,
+      "service_evidence": 0
+    },
+    "score": 3199,
+    "observers": {
+      "raw": 1,
+      "groups": 1,
+      "weightedBps": 2000
+    },
+    "coverage": {
+      "historyObservations": 1,
+      "geographicGroups": 0,
+      "reenrollmentRiskAvailable": false,
+      "crossDeployerHistory": "unavailable"
+    },
+    "status": "LOW"
+  },
+  "commitment": "60f8cc3c6dff163cd30dd7ec7f0810b1b7ca6264ecf98cb94b9c57e1debfea0d"
+}

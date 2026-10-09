@@ -210,6 +210,7 @@ pub fn append_observation(state: &mut DeviceEpoch, transcript: &[u8; 32]) -> Res
     }
     state.observation_root = node;
     state.independent_observers = count + 1;
+    state.confidence_commitment = [0; 32];
     Ok(())
 }
 
