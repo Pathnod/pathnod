@@ -175,8 +175,8 @@ export class AppAttestGate {
     if (key === undefined) throw new AppAttestVerificationError("invalid_key");
     const verified = this.#verifier.verifyAssertion({ key, object, expectedChallenge: challenge.bytes });
     const update = this.#database.prepare(
-      "UPDATE app_attest_keys SET counter = ?, bundle_version = ? WHERE key_id = ? AND counter = ?",
-    ).run(verified.counter, verified.bundleVersion ?? null, keyID, key.counter);
+      "UPDATE app_attest_keys SET counter = ?, bundle_version = ?, validation_category = ? WHERE key_id = ? AND counter = ?",
+    ).run(verified.counter, verified.bundleVersion ?? null, verified.validationCategory ?? null, keyID, key.counter);
     if (update.changes !== 1) throw new AppAttestVerificationError("invalid_counter");
     return verified;
   }

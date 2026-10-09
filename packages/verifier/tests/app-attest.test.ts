@@ -84,6 +84,14 @@ function syntheticEnrollment(): { key: VerifiedAppAttestKey; privateKey: KeyObje
   };
 }
 
+function legacyAssertion(privateKey: KeyObject, challenge: Buffer, counter: number): Buffer {
+  const counterBytes = Buffer.alloc(4);
+  counterBytes.writeUInt32BE(counter);
+  const authData = Buffer.concat([sha256(Buffer.from(appID)), Buffer.from([0]), counterBytes]);
+  const signature = sign("sha256", sha256(authData, sha256(challenge)), privateKey);
+  return cbor(new Map([["signature", signature], ["authenticatorData", authData]]));
+}
+
 describe("strict App Attest inputs", () => {
   it("pins the Apple App Attestation root certificate", () => {
     const root = new X509Certificate(readFileSync(new URL("../Apple_App_Attestation_Root_CA.crt", import.meta.url)));
@@ -220,6 +228,89 @@ it("persists the authorized app version alongside the assertion counter", () => 
     assert.equal(gate.getKey(key.keyID)?.counter, 1);
     gate.close();
   } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+it("accepts signed pre-iOS 27 assertions with pinned versions and still rejects tampering and replay", () => {
+  const verifier = new AppAttestVerifier({ ...developmentPolicy, allowedBundleVersions: ["1"] });
+  const enrolled = syntheticEnrollment();
+  const { validationCategory: _category, bundleVersion: _version, ...legacyKey } = enrolled.key;
+  const challenge = randomBytes(32);
+  const assertion = legacyAssertion(enrolled.privateKey, challenge, 1);
+  const verified = verifier.verifyAssertion({ key: legacyKey, object: assertion, expectedChallenge: challenge });
+  assert.equal(verified.counter, 1);
+  assert.equal(verified.bundleVersion, undefined);
+  assert.equal(verified.validationCategory, undefined);
+  const modern = decodeCbor(signedAssertion(enrolled.privateKey, challenge, 1, "1")) as Map<string, Buffer>;
+  const stripped = Buffer.from(modern.get("authenticatorData")!.subarray(0, 37));
+  stripped[32] = 0;
+  rejectsCode("invalid_assertion", () => verifier.verifyAssertion({
+    key: legacyKey, object: cbor(new Map([["signature", modern.get("signature")!], ["authenticatorData", stripped]])),
+    expectedChallenge: challenge,
+  }));
+  rejectsCode("invalid_assertion", () => verifier.verifyAssertion({
+    key: legacyKey, object: assertion, expectedChallenge: randomBytes(32),
+  }));
+  rejectsCode("invalid_counter", () => verifier.verifyAssertion({ key: verified, object: assertion, expectedChallenge: challenge }));
+  const { privateKey: otherKey } = syntheticEnrollment();
+  rejectsCode("invalid_assertion", () => verifier.verifyAssertion({
+    key: legacyKey, object: legacyAssertion(otherKey, challenge, 1), expectedChallenge: challenge,
+  }));
+  rejectsCode("invalid_environment", () => verifier.verifyAssertion({
+    key: legacyKey, object: signedAssertion(enrolled.privateKey, challenge, 1, undefined), expectedChallenge: challenge,
+  }));
+});
+
+it("pins extensions after a legacy key upgrades and refuses a later downgrade", () => {
+  const verifier = new AppAttestVerifier({ ...developmentPolicy, allowedBundleVersions: ["1"] });
+  const enrolled = syntheticEnrollment();
+  const { validationCategory: _category, bundleVersion: _version, ...legacyKey } = enrolled.key;
+  const challenge = randomBytes(32);
+  const upgraded = verifier.verifyAssertion({ key: legacyKey,
+    object: signedAssertion(enrolled.privateKey, challenge, 1, "1"), expectedChallenge: challenge });
+  assert.equal(upgraded.bundleVersion, "1");
+  assert.equal(upgraded.validationCategory, 3);
+  rejectsCode("invalid_environment", () => verifier.verifyAssertion({ key: upgraded,
+    object: legacyAssertion(enrolled.privateKey, challenge, 2), expectedChallenge: challenge }));
+  const { validationCategory: _upgradedCategory, ...versionOnly } = upgraded;
+  rejectsCode("invalid_environment", () => verifier.verifyAssertion({ key: versionOnly,
+    object: legacyAssertion(enrolled.privateKey, challenge, 2), expectedChallenge: challenge }));
+  rejectsCode("invalid_environment", () => verifier.verifyAssertion({ key: legacyKey,
+    object: signedAssertion(enrolled.privateKey, challenge, 1, "2"), expectedChallenge: challenge }));
+});
+
+it("persists a legacy key's new signed metadata across a server restart", () => {
+  const directory = mkdtempSync(join(tmpdir(), "pathnod-app-attest-legacy-"));
+  const path = join(directory, "gate.sqlite");
+  const policy = { ...developmentPolicy, allowedBundleVersions: ["1"], allowedValidationCategories: [3, 4] };
+  let gate: AppAttestGate | undefined;
+  try {
+    gate = new AppAttestGate(path, policy);
+    const { key, privateKey } = syntheticEnrollment();
+    const db = new DatabaseSync(path);
+    db.prepare(`INSERT INTO app_attest_keys
+      (key_id, public_key_pem, app_id, environment, counter, validation_category, bundle_version)
+      VALUES (?, ?, ?, ?, 0, NULL, NULL)`).run(key.keyID, key.publicKeyPem, key.appID, key.environment);
+    db.close();
+    const legacy = gate.issueChallenge("assertion", key.keyID);
+    gate.acceptAssertion(legacy.id, key.keyID, legacyAssertion(privateKey, legacy.bytes, 1));
+    const upgrade = gate.issueChallenge("assertion", key.keyID);
+    gate.acceptAssertion(upgrade.id, key.keyID, signedAssertion(privateKey, upgrade.bytes, 2, "1"));
+    gate.close();
+    gate = new AppAttestGate(path, policy);
+    assert.equal(gate.getKey(key.keyID)?.validationCategory, 3);
+    assert.equal(gate.getKey(key.keyID)?.bundleVersion, "1");
+    assert.equal(gate.getKey(key.keyID)?.counter, 2);
+    const downgrade = gate.issueChallenge("assertion", key.keyID);
+    rejectsCode("invalid_environment", () => gate!.acceptAssertion(downgrade.id, key.keyID,
+      legacyAssertion(privateKey, downgrade.bytes, 3)));
+    const categoryChange = gate.issueChallenge("assertion", key.keyID);
+    rejectsCode("invalid_environment", () => gate!.acceptAssertion(categoryChange.id, key.keyID,
+      signedAssertion(privateKey, categoryChange.bytes, 3, "1", 4)));
+    assert.equal(gate.getKey(key.keyID)?.counter, 2);
+  } finally {
+    gate?.close();
     rmSync(directory, { recursive: true, force: true });
   }
 });

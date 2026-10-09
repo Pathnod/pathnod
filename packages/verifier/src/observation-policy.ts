@@ -164,8 +164,8 @@ export class ObservationPolicyService {
     try {
       const current = this.#key(input.key_id);
       if (!current || current.counter !== key.counter || current.publicKeyPem !== key.publicKeyPem) reject('E_ASSERTION');
-      const changed = this.#db.prepare('UPDATE app_attest_keys SET counter=?, bundle_version=? WHERE key_id=? AND counter=?')
-        .run(asserted.counter, asserted.bundleVersion ?? null, input.key_id, key.counter);
+      const changed = this.#db.prepare('UPDATE app_attest_keys SET counter=?, bundle_version=?, validation_category=? WHERE key_id=? AND counter=?')
+        .run(asserted.counter, asserted.bundleVersion ?? null, asserted.validationCategory ?? null, input.key_id, key.counter);
       if (changed.changes !== 1) reject('E_ASSERTION');
       signature = this.#relay.signer.signClaimDigest(claimDigest(authorization));
       this.#db.exec('COMMIT');
@@ -292,8 +292,8 @@ export class ObservationPolicyService {
       if (this.#relay && Number(this.#db.prepare("SELECT COUNT(*) AS n FROM observation_relay_jobs").get()!.n) >= this.#relay.capacity) {
         throw new ObservationPolicyError("observation_capacity");
       }
-      const changed = this.#db.prepare("UPDATE app_attest_keys SET counter=?, bundle_version=? WHERE key_id=? AND counter=?")
-        .run(asserted.counter, asserted.bundleVersion ?? null, envelope.key_id, key.counter);
+      const changed = this.#db.prepare("UPDATE app_attest_keys SET counter=?, bundle_version=?, validation_category=? WHERE key_id=? AND counter=?")
+        .run(asserted.counter, asserted.bundleVersion ?? null, asserted.validationCategory ?? null, envelope.key_id, key.counter);
       if (changed.changes !== 1) reject("E_ASSERTION");
       if (counterEnabled) this.#db.prepare(`INSERT INTO observation_device_counters_v0 VALUES (?, ?)
         ON CONFLICT(device_id) DO UPDATE SET counter=excluded.counter`).run(device, t.challenges[2]!.deviceCounter);

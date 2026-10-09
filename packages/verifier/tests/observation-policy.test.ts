@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
 import { AppAttestGate } from "../src/app-attest-gate.ts";
+import type { AppAttestPolicy } from "../src/app-attest.ts";
 import { ObserverEnrollmentService } from "../src/observer-enrollment.ts";
 import { ObservationPolicyService, ObservationPolicyError, type ObservationPolicySource } from "../src/observation-policy.ts";
 import { decodeObservationTranscript, encodeObservationTranscript, type ObservationTranscript } from "../src/observation-transcript.ts";
@@ -28,14 +29,14 @@ function head(major: number, size: number): Buffer {
   if (size < 256) return Buffer.from([major << 5 | 24, size]);
   const b = Buffer.alloc(3); b[0] = major << 5 | 25; b.writeUInt16BE(size, 1); return b;
 }
-function cbor(value: string | Buffer | Map<string, Buffer>): Buffer {
+function cbor(value: string | Buffer | Map<string, Buffer | string>): Buffer {
   if (typeof value === "string") { const b = Buffer.from(value); return Buffer.concat([head(3, b.length), b]); }
   if (Buffer.isBuffer(value)) return Buffer.concat([head(2, value.length), value]);
   return Buffer.concat([head(5, value.size), ...[...value].flatMap(([key, v]) => [cbor(key), cbor(v)])]);
 }
-async function fixture(capacity = 100) {
+async function fixture(capacity = 100, attestPolicy: AppAttestPolicy = policy) {
   const dir = mkdtempSync(join(tmpdir(), "pathnod-dev33-")), path = join(dir, "enrollment.sqlite");
-  const gate = new AppAttestGate(path, policy);
+  const gate = new AppAttestGate(path, attestPolicy);
   const enrollment = await ObserverEnrollmentService.open(path, gate);
   const db = new DatabaseSync(path), keyID = randomBytes(32).toString("base64");
   const key = generateKeyPairSync("ec", { namedCurve: "prime256v1" });
@@ -54,14 +55,21 @@ async function fixture(capacity = 100) {
     if (unavailable) throw Error("test RPC unavailable"); return snapshot;
   } };
   const proof = { verify: async () => { proofCalls++; return proofValid; } };
-  let service = new ObservationPolicyService(path, policy, source, proof, { clock: () => now, capacity });
+  let service = new ObservationPolicyService(path, attestPolicy, source, proof, { clock: () => now, capacity });
   function assertion(bytes: Buffer, assertionCounter = 1): string {
     const hash = createHash("sha256").update("Pathnod/transcript/v0").update(bytes).digest();
     return claimAssertion(hash,assertionCounter);
   }
-  function claimAssertion(hash: Buffer, assertionCounter: number): string {
+  function claimAssertion(hash: Buffer, assertionCounter: number, metadata?: { version: string; category: number }): string {
     const counter = Buffer.alloc(4); counter.writeUInt32BE(assertionCounter);
-    const auth = Buffer.concat([digest(Buffer.from(policy.appID)), Buffer.from([0]), counter]);
+    let extensions: Buffer = Buffer.alloc(0);
+    if (metadata) {
+      const category = Buffer.alloc(4); category.writeUInt32LE(metadata.category);
+      extensions = cbor(new Map<string, Buffer | string>([
+        ["apple_validation_category_01", category], ["apple_bundle_version_01", metadata.version],
+      ]));
+    }
+    const auth = Buffer.concat([digest(Buffer.from(policy.appID)), Buffer.from([metadata ? 0x80 : 0]), counter, extensions]);
     return cbor(new Map([["signature", sign("sha256", digest(auth, hash), key.privateKey)], ["authenticatorData", auth]])).toString("base64");
   }
   function envelope(transcript: ObservationTranscript = t, assertionCounter = 1): ObservationEnvelope {
@@ -75,14 +83,14 @@ async function fixture(capacity = 100) {
   return { dir, path, db, gate, enrollment, t, keyID, snapshot, envelope, assertion, claimAssertion, source,
     get service() { return service; }, get proofCalls() { return proofCalls; },
     setNow: (n: number) => { now = n; }, setProof: (v: boolean) => { proofValid = v; }, setUnavailable: () => { unavailable = true; },
-    restart: () => { service.close(); service = new ObservationPolicyService(path, policy, source, proof, { clock: () => now, capacity }); },
+    restart: () => { service.close(); service = new ObservationPolicyService(path, attestPolicy, source, proof, { clock: () => now, capacity }); },
     enableRelay: (signer: ObservationSigner, relayCapacity = capacity) => {
       service.close(); snapshot.verifier = signer.publicKey;
-      service = new ObservationPolicyService(path, policy, source, proof,
+      service = new ObservationPolicyService(path, attestPolicy, source, proof,
         { clock: () => now, capacity, relay: { signer, capacity: relayCapacity } });
     },
     enableConfidence: (confidence: ConfidenceRecorder) => {
-      service.close();service=new ObservationPolicyService(path,policy,source,proof,{clock:()=>now,capacity,confidence});
+      service.close();service=new ObservationPolicyService(path,attestPolicy,source,proof,{clock:()=>now,capacity,confidence});
     },
     close: () => { service.close(); db.close(); enrollment.close(); gate.close(); rmSync(dir, { recursive: true, force: true }); } };
 }
@@ -162,6 +170,35 @@ test('DEV-36 first withdrawal requires the attested observation owner and fresh 
     assert.equal(result.signature,signer.signClaimDigest(claimDigest(authorization)));
     assert.equal(f.gate.getKey(f.keyID)!.counter,2);
     await code('E_ASSERTION',f.service.authorizeClaim(request));
+  } finally { f.close(); }
+});
+test('DEV-41 observations and withdrawals preserve new signed metadata and reject downgrades after restart', async () => {
+  const f = await fixture(100, { ...policy, allowedBundleVersions: ['1'], allowedValidationCategories: [3, 4] });
+  const signer = new ObservationSigner(Buffer.alloc(32, 7));
+  try {
+    f.enableRelay(signer);
+    const envelope = f.envelope();
+    const transcriptHash = createHash('sha256').update('Pathnod/transcript/v0').update(Buffer.from(envelope.transcript, 'base64')).digest();
+    envelope.assertion = f.claimAssertion(transcriptHash, 1, { version: '1', category: 3 });
+    await f.service.receive(envelope);
+    assert.equal(f.gate.getKey(f.keyID)?.validationCategory, 3);
+    assert.equal(f.gate.getKey(f.keyID)?.bundleVersion, '1');
+
+    // Start with an unknown category to exercise the withdrawal upgrade independently.
+    f.db.prepare('UPDATE app_attest_keys SET validation_category=NULL WHERE key_id=?').run(f.keyID);
+    const request = { pseudonym: Buffer.from(f.t.pseudonym).toString('hex'), withdrawal_key: DEVNET_USDC.toBase58(),
+      destination: DEVNET_USDC.toBase58(), key_id: f.keyID, expires_at: '2000000000', assertion: '' };
+    const authorization = await f.source.claim!(request.pseudonym, request.withdrawal_key, request.destination, request.expires_at);
+    request.assertion = f.claimAssertion(claimDigest(authorization), 2, { version: '1', category: 3 });
+    await f.service.authorizeClaim(request);
+    assert.equal(f.gate.getKey(f.keyID)?.validationCategory, 3);
+    assert.equal(f.gate.getKey(f.keyID)?.counter, 2);
+    f.restart(); f.enableRelay(signer);
+    await code('E_ASSERTION', f.service.authorizeClaim({ ...request, assertion: f.claimAssertion(claimDigest(authorization), 3) }));
+    await code('E_ASSERTION', f.service.authorizeClaim({ ...request,
+      assertion: f.claimAssertion(claimDigest(authorization), 3, { version: '1', category: 4 }) }));
+    assert.equal(f.gate.getKey(f.keyID)?.counter, 2);
+    assert.equal(f.db.prepare('SELECT count(*) AS n FROM observation_relay_jobs').get()!.n, 1);
   } finally { f.close(); }
 });
 test("DEV-34: historical receipts cannot enqueue; key mismatch and capacity never consume counters", async () => {

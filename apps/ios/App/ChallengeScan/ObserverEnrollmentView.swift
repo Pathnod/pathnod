@@ -13,7 +13,7 @@ struct ObserverEnrollmentView: View {
     var body: some View {
         List {
             Section("Before enrollment") {
-                Text("Pathnod creates a private observer secret on this iPhone and keeps it in this device's Keychain.")
+                Text("Pathnod creates a private observer secret on this device and keeps it in this device's Keychain.")
                 Text("Enrollment sends the public commitment and Apple's attestation. The secret is never sent.")
                 Button("Prepare observer commitment") { prepare() }
                     .accessibilityIdentifier("prepareEnrollmentPreview")
@@ -27,7 +27,7 @@ struct ObserverEnrollmentView: View {
                         .font(.footnote.monospaced())
                         .textSelection(.enabled)
                         .accessibilityIdentifier("observerCommitment")
-                    Text("The private observer secret stays in this iPhone's Keychain.")
+                    Text("The private observer secret stays in this device's Keychain.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
@@ -40,7 +40,7 @@ struct ObserverEnrollmentView: View {
                         .disabled(isWorking)
                     Text("Use HTTPS for a hosted service. Local .local HTTP is available in development builds only.")
                         .font(.footnote).foregroundStyle(.secondary)
-                    Button("Enroll this iPhone") { Task { await enroll(commitmentHex) } }
+                    Button("Enroll this device") { Task { await enroll(commitmentHex) } }
                         .disabled(isWorking || serverURL.isEmpty)
                     if path != nil {
                         Button("Refresh Merkle path") { Task { await refresh(commitmentHex) } }

@@ -23,7 +23,7 @@ struct ObservationSessionView: View {
         List {
             Section("What is collected") {
                 Text("The device identity and three signed replies, challenge timing, Bluetooth signal samples, and an observer identifier scoped to this protocol.")
-                Text("Only the device ID and epoch are sent to check available slots. The completed session stays on this iPhone. Your private observer secret and precise GPS coordinates are never included.")
+                Text("Only the device ID and epoch are sent to check available slots. The completed session stays on this device. Your private observer secret and precise GPS coordinates are never included.")
                     .font(.footnote).foregroundStyle(.secondary)
                 Toggle("I have reviewed this information", isOn: $privacyReviewed)
                     .accessibilityIdentifier("observationPrivacyConsent")

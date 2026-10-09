@@ -50,6 +50,9 @@ duplicate/evidence commands. See [the physical Gate 2 runbook](docs/dev38-physic
 DEV-39 adds auditable confidence vectors, requester-encrypted observation history
 and epoch confidence publication. See [the confidence policy and runbook](docs/dev39-confidence.md).
 
+DEV-41 validates three physical Apple observers (two iPhones and an iPad) on the
+same ESP32 and devnet epoch. See [the provisioning procedure and public evidence](docs/dev41-three-apple-observers.md).
+
 ## Current status
 
 Pathnod is at an early development stage. The intended protocol above is not a

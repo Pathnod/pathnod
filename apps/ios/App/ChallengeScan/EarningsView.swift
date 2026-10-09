@@ -35,9 +35,9 @@ struct EarningsView: View {
                     LabeledContent("Withdrawn USDC", value: balance.withdrawn)
                 }
             }
-            Section("Withdrawal key — this iPhone") {
+            Section("Withdrawal key — this device") {
                 Text(address).font(.caption.monospaced()).textSelection(.enabled)
-                Text("Fund this address with devnet SOL for transaction fees and create a devnet USDC token account owned by it. Paste that token account below. The private key stays in this iPhone's Keychain; deleting it loses access to withdrawals.")
+                Text("Fund this address with devnet SOL for transaction fees and create a devnet USDC token account owned by it. Paste that token account below. The private key stays in this device's Keychain; deleting it loses access to withdrawals.")
                     .font(.footnote)
                 TextField("Destination USDC token account", text: $destination)
                 Toggle("I understand the wallet–pseudonym link is public in v0", isOn: $consent)
