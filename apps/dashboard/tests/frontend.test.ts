@@ -32,8 +32,9 @@ test('actual frontend clears active scores on stale/error and ignores late epoch
     if(url.startsWith('/api/devices?'))return Response.json({...context,total:1,offset:0,queryLimit:1000,currentEpoch:42,devices:[device]});
     detailCalls++;signal=options.signal;return answer(url);
   };
-  const code=readFileSync(new URL('../public/app.js',import.meta.url),'utf8').replace("import { LatestRequest, percentage, explorer } from './state.js';",'');
-  runInNewContext(code,{LatestRequest,percentage,explorer,fetch:fetcher,document:{hidden:false,getElementById:element,createElement:()=>new Element()},setTimeout:(callback:()=>Promise<void>)=>{poll=callback;return 0;},AbortController,URL,Date,Number,Error});
+  const code=readFileSync(new URL('../public/app.js',import.meta.url),'utf8').replace("import { LatestRequest, percentage, explorer } from './state.js';",'').replace("import { declaredAreaMap } from './map.js';",'');
+  const mapCode=readFileSync(new URL('../public/map.js',import.meta.url),'utf8').replaceAll('export function','function');
+  runInNewContext(mapCode+'\n'+code,{LatestRequest,percentage,explorer,fetch:fetcher,document:{hidden:false,getElementById:element,createElement:()=>new Element(),createElementNS:()=>new Element()},setTimeout:(callback:()=>Promise<void>)=>{poll=callback;return 0;},AbortController,URL,Date,Number,Error});
   await flush();element('devices').children[0]!.onclick();await flush();assert.match(element('detail').textContent,/36.93% · Limited confidence/);
   assert.match(element('context').textContent,/real records on Solana’s test network/);
   assert.match(element('detail').textContent,/Device identity details/);
@@ -41,6 +42,7 @@ test('actual frontend clears active scores on stale/error and ignores late epoch
   assert.match(element('detail').textContent,/Observer attestation/);
   assert.match(element('detail').textContent,/observing phone/);
   assert.ok(!element('detail').textContent.includes('Device authenticity'));
+  assert.match(element('detail').textContent,/No declared location/);
   assert.match(element('detail').textContent,/hardware_confidence: 10000\/10000/);
   assert.match(element('detail').textContent,/probability/);
   const identityDetails=element('detail').children[0]!.children.find(c=>c.className==='technical')!;

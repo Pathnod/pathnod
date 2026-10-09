@@ -1,4 +1,5 @@
 import { LatestRequest, percentage, explorer } from './state.js';
+import { declaredAreaMap } from './map.js';
 const $ = id => document.getElementById(id);
 const listRequest = new LatestRequest(), detailRequest = new LatestRequest();
 const expandedDetails = new Map();
@@ -35,6 +36,7 @@ async function loadDetail({background=false}={}){
 }
 function render(data){
  const root=$('detail');root.replaceChildren();const identity=node('section',undefined,'identity');identity.append(node('h3',`Device · ${data.device.id.slice(0,12)}…`),node('p',`Declared location: ${data.device.declaredLocation??'not provided'}. This is information supplied by the operator, not a verified GPS position.`),details('Device identity details',node('code',`Device ID: ${data.device.id}`),node('code',`Public key: ${data.device.key}`),node('p',`Capabilities bitmask: ${data.device.capabilities}`),link('address',data.device.address,'View registration on Solana ↗')));root.append(identity);
+ root.append(declaredAreaMap(data.device.declaredLocation));
  const metrics=node('div',undefined,'metrics');metrics.append(item('Reporting period',data.epoch),item('Recorded observations',data.state?.observers??0),item('Reward allocations',data.state?.paidSlots??0));root.append(metrics,node('p','Observations do not necessarily represent different people. Reward allocations are not completed withdrawals.','note'));
  const chainDetails=[node('p',`Epoch: ${data.epoch} · Policy version: ${data.policyVersion}`)];
  if(data.state)chainDetails.push(node('code',`Observation root: ${data.state.root}`),node('code',`On-chain confidence commitment: ${data.state.commitment}`));

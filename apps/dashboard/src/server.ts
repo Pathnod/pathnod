@@ -17,7 +17,7 @@ export function createDashboardServer(service: DashboardService) {
     let url: URL;
     try { url=new URL(req.url??'/','http://dashboard.invalid'); }
     catch { json(400,{error:'invalid_input'});return; }
-    const allowed:Record<string,string>={'/':'index.html','/app.js':'app.js','/state.js':'state.js','/style.css':'style.css','/details.css':'details.css','/mark.png':'mark.png'};
+    const allowed:Record<string,string>={'/':'index.html','/app.js':'app.js','/state.js':'state.js','/map.js':'map.js','/style.css':'style.css','/details.css':'details.css','/mark.png':'mark.png'};
     if(allowed[url.pathname]&&!url.search){
       try{res.setHeader('content-type',url.pathname.endsWith('.png')?'image/png':url.pathname.endsWith('.css')?'text/css':url.pathname.endsWith('.js')?'text/javascript':'text/html');res.end(await readFile(new URL(allowed[url.pathname]!,assets)));}
       catch{json(503,{error:'asset_unavailable'});}return;
