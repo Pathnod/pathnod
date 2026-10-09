@@ -38,7 +38,9 @@ test('actual frontend clears active scores on stale/error and ignores late epoch
   assert.match(element('context').textContent,/real records on Solana’s test network/);
   assert.match(element('detail').textContent,/Device identity details/);
   assert.match(element('detail').textContent,/Recorded observations/);
-  assert.match(element('detail').textContent,/Device authenticity/);
+  assert.match(element('detail').textContent,/Observer attestation/);
+  assert.match(element('detail').textContent,/observing phone/);
+  assert.ok(!element('detail').textContent.includes('Device authenticity'));
   assert.match(element('detail').textContent,/hardware_confidence: 10000\/10000/);
   assert.match(element('detail').textContent,/probability/);
   const identityDetails=element('detail').children[0]!.children.find(c=>c.className==='technical')!;
