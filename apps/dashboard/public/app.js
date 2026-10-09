@@ -3,6 +3,7 @@ const $ = id => document.getElementById(id);
 const listRequest = new LatestRequest(), detailRequest = new LatestRequest();
 const expandedDetails = new Map();
 let offset=0,total=0,selected=null,network=null;
+let detailPending=false,viewKey=null,lastResponse=null,lastChecked=null;
 function node(tag,text,className){const n=document.createElement(tag);if(text!==undefined)n.textContent=text;if(className)n.className=className;return n;}
 function item(label,value){const div=node('div',undefined,'metric');div.append(node('span',label,'label'),node('strong',String(value)));return div;}
 function details(label,...children){const section=node('details',undefined,'technical');const key=label==='Data source details'?label:`${selected}/${$('epoch').value}/${label}`;section.open=expandedDetails.get(key)===true;section.ontoggle=()=>expandedDetails.set(key,section.open);section.append(node('summary',label),...children);return section;}
@@ -16,13 +17,21 @@ async function loadList(){
   $('list-message').textContent=total?`${total} registered ${total===1?'device':'devices'} in this network protocol.`:'No devices have been registered in this network protocol yet.';
   for(const device of data.devices){const button=node('button',undefined,'device');button.append(node('strong',`Device · ${device.id.slice(0,12)}…`),node('span',device.declaredLocation?`Declared area: ${device.declaredLocation}`:'Location not provided'));button.dataset.id=device.id;button.setAttribute('aria-pressed',String(selected===device.id));button.onclick=()=>{selected=device.id;for(const b of $('devices').children)b.setAttribute('aria-pressed',String(b.dataset.id===selected));loadDetail();};$('devices').append(button);}
   $('page').textContent=total?`${offset+1}–${Math.min(offset+25,total)} / ${total}`:'0 devices';$('previous').disabled=offset===0;$('next').disabled=offset+25>=total;
- }catch(error){if(!listRequest.current(request)||error.name==='AbortError')return;$('list-message').textContent='We couldn’t load the devices or verify the data source. Select Refresh to try again. No sample data is shown.';$('context').textContent='Data source unavailable';detailRequest.begin();$('detail').replaceChildren(node('p','Device information is unavailable. Previous results have been cleared.','empty'));}
+ }catch(error){if(!listRequest.current(request)||error.name==='AbortError')return;$('list-message').textContent='We couldn’t load the devices or verify the data source. Select Refresh to try again. No sample data is shown.';$('context').textContent='Data source unavailable';detailRequest.begin();detailPending=false;viewKey=null;lastResponse=null;lastChecked=null;$('detail-status').textContent='Data source unavailable';$('detail').replaceChildren(node('p','Device information is unavailable. Previous results have been cleared.','empty'));}
 }
-async function loadDetail(){
- const request=detailRequest.begin();$('detail').replaceChildren(node('p','Loading confirmed observations and the confidence report…','empty'));if(!selected)return;
- const epoch=Number($('epoch').value);if(!Number.isInteger(epoch)||epoch<0||epoch>4294967295){$('detail').textContent='Enter a whole period number between 0 and 4294967295.';return;}
- try{const data=await get(`/api/devices/${selected}?epoch=${epoch}`,request.signal);if(!detailRequest.current(request))return;render(data);}
- catch(error){if(!detailRequest.current(request)||error.name==='AbortError')return;$('detail').replaceChildren(node('p','We couldn’t load a consistent view of this period. Select View period to try again. The previous score has been cleared.','empty'));}
+async function loadDetail({background=false}={}){
+ const key=`${selected}/${$('epoch').value}`;
+ if(!selected || (background&&(detailPending||viewKey!==key)))return;
+ const request=detailRequest.begin();detailPending=true;
+ if(!background){viewKey=key;lastResponse=null;lastChecked=null;$('detail').replaceChildren(node('p','Loading confirmed observations and the confidence report…','empty'));}
+ $('detail-status').textContent=background?`Updating… ${lastChecked?`Showing the last check from ${lastChecked}.`:'Retrying the data source.'}`:'Checking this period…';
+ try{
+  const epoch=Number($('epoch').value);if($('epoch').value===''||!Number.isInteger(epoch)||epoch<0||epoch>4294967295)throw Error('Invalid period');
+  const data=await get(`/api/devices/${selected}?epoch=${epoch}`,request.signal);if(!detailRequest.current(request))return;
+  const snapshot=JSON.stringify(data);if(snapshot!==lastResponse){render(data);lastResponse=snapshot;}
+  lastChecked=new Date().toLocaleTimeString('en-GB');$('detail-status').textContent=`Last checked ${lastChecked} · Next automatic check in about 15 seconds.`;
+ }catch(error){if(!detailRequest.current(request)||error.name==='AbortError')return;lastResponse=null;lastChecked=null;$('detail-status').textContent='Update failed · No active score';$('detail').replaceChildren(node('p','We couldn’t load a consistent view of this period. Select View period to try again. The previous score has been cleared.','empty'));}
+ finally{if(detailRequest.current(request))detailPending=false;}
 }
 function render(data){
  const root=$('detail');root.replaceChildren();const identity=node('section',undefined,'identity');identity.append(node('h3',`Device · ${data.device.id.slice(0,12)}…`),node('p',`Declared location: ${data.device.declaredLocation??'not provided'}. This is information supplied by the operator, not a verified GPS position.`),details('Device identity details',node('code',`Device ID: ${data.device.id}`),node('code',`Public key: ${data.device.key}`),node('p',`Capabilities bitmask: ${data.device.capabilities}`),link('address',data.device.address,'View registration on Solana ↗')));root.append(identity);
@@ -46,4 +55,5 @@ function render(data){
  for(const [index,record]of data.observations.entries()){const row=node('div',undefined,'observation');row.append(node('strong',`Observation ${index+1}`),node('span',`Confirmed on Solana · ${record.paid?'Reward allocated (not withdrawn)':'No reward allocation'}`),link('address',record.address,'View blockchain record ↗'),details(`Observation ${index+1} technical details`,node('code',`Transcript hash: ${record.hash}`),node('p',`Observer class: ${record.observerClass} · Finalized commitment account`)));observations.append(row);}root.append(observations);
 }
 $('reload').onclick=()=>{loadList();if(selected)loadDetail();};$('previous').onclick=()=>{offset=Math.max(0,offset-25);loadList();};$('next').onclick=()=>{offset+=25;loadList();};$('epoch-form').onsubmit=event=>{event.preventDefault();loadDetail();};
-loadList();setInterval(()=>{if(selected&&!document.hidden)loadDetail();},15000);
+async function poll(){try{if(selected&&!document.hidden)await loadDetail({background:true});}finally{setTimeout(poll,15000);}}
+loadList();setTimeout(poll,15000);

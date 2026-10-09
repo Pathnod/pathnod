@@ -18,7 +18,7 @@ class Element {
 }
 const flush=async()=>{await new Promise(resolve=>setImmediate(resolve));};
 test('actual frontend clears active scores on stale/error and ignores late epoch responses',async()=>{
-  const ids=['context','list-message','devices','previous','next','epoch','detail','page','reload','epoch-form'];
+  const ids=['context','list-message','devices','previous','next','epoch','detail','detail-status','page','reload','epoch-form'];
   const elements=new Map(ids.map(id=>[id,new Element()]));const element=(id:string)=>elements.get(id)!;
   const context={network:'devnet',program:'5V9pXQN5dQkRBSTsaezBg6qLRC3mbLj21Ny3j7xtuHTd',protocolID:'01'.repeat(32)};
   const device={id:'02'.repeat(32),key:'03'.repeat(32),capabilities:2,declaredLocation:null,address:context.program};
@@ -27,9 +27,13 @@ test('actual frontend clears active scores on stale/error and ignores late epoch
     observers:{raw:1,groups:1},coverage:{reenrollmentRiskAvailable:false},signature:null};
   const detail=(confidence:unknown,epoch=42)=>({...context,device,epoch,policyVersion:1,state:{observers:1,paidSlots:1,root:'05'.repeat(32)},observations:[],confidence});
   let answer:(url:string)=>Promise<Response>=async()=>Response.json(detail(published));
-  const fetcher=async(url:string)=>url.startsWith('/api/devices?')?Response.json({...context,total:1,offset:0,queryLimit:1000,currentEpoch:42,devices:[device]}):answer(url);
+  let detailCalls=0,signal:AbortSignal|undefined,poll!:()=>Promise<void>;
+  const fetcher=async(url:string,options:{signal:AbortSignal})=>{
+    if(url.startsWith('/api/devices?'))return Response.json({...context,total:1,offset:0,queryLimit:1000,currentEpoch:42,devices:[device]});
+    detailCalls++;signal=options.signal;return answer(url);
+  };
   const code=readFileSync(new URL('../public/app.js',import.meta.url),'utf8').replace("import { LatestRequest, percentage, explorer } from './state.js';",'');
-  runInNewContext(code,{LatestRequest,percentage,explorer,fetch:fetcher,document:{hidden:false,getElementById:element,createElement:()=>new Element()},setInterval:()=>0,AbortController,URL,Date,Number,Error});
+  runInNewContext(code,{LatestRequest,percentage,explorer,fetch:fetcher,document:{hidden:false,getElementById:element,createElement:()=>new Element()},setTimeout:(callback:()=>Promise<void>)=>{poll=callback;return 0;},AbortController,URL,Date,Number,Error});
   await flush();element('devices').children[0]!.onclick();await flush();assert.match(element('detail').textContent,/36.93% · Limited confidence/);
   assert.match(element('context').textContent,/real records on Solana’s test network/);
   assert.match(element('detail').textContent,/Device identity details/);
@@ -47,4 +51,19 @@ test('actual frontend clears active scores on stale/error and ignores late epoch
   answer=async()=>Response.json(detail({status:'missing'},44));element('epoch').value='44';element('epoch-form').onsubmit({preventDefault(){}});await flush();
   finish(Response.json(detail(published,43)));await flush();assert.match(element('detail').textContent,/No report is available for this period/);assert.ok(!element('detail').textContent.includes('36.93%'));
   answer=async()=>new Response('{}',{status:503});element('epoch-form').onsubmit({preventDefault(){}});await flush();assert.match(element('detail').textContent,/couldn’t load a consistent view/);
+  answer=async()=>Response.json(detail(published,44));element('epoch-form').onsubmit({preventDefault(){}});await flush();
+  const visibleIdentity=element('detail').children[0];
+  answer=()=>new Promise(resolve=>{finish=resolve;});const before=detailCalls;
+  const pendingPoll=poll();assert.equal(detailCalls,before+1);assert.equal(element('detail').children[0],visibleIdentity);
+  assert.match(element('detail-status').textContent,/Updating/);assert.match(element('detail').textContent,/36.93%/);
+  await poll();assert.equal(detailCalls,before+1);assert.equal(signal!.aborted,false);
+  finish(Response.json(detail(published,44)));await pendingPoll;
+  assert.equal(element('detail').children[0],visibleIdentity);assert.match(element('detail-status').textContent,/Last checked/);
+  for(const status of ['stale','missing','unavailable']){
+    answer=async()=>Response.json(detail({status},44));await poll();
+    assert.ok(!element('detail').textContent.includes('36.93%'));assert.match(element('detail').textContent,new RegExp(`API status: ${status}`));
+    answer=async()=>Response.json(detail(published,44));await poll();assert.match(element('detail').textContent,/36.93%/);
+  }
+  answer=async()=>new Response('{}',{status:503});await poll();assert.ok(!element('detail').textContent.includes('36.93%'));
+  answer=async()=>Response.json(detail(published,44));await poll();assert.match(element('detail').textContent,/36.93%/);
 });
