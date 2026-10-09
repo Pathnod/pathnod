@@ -1,5 +1,6 @@
 packages:
   - packages/*
+  - apps/dashboard
 
 engineStrict: true
 minimumReleaseAge: 1440

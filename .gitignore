@@ -9,6 +9,7 @@ test-ledger/
 *.pem
 .env
 .env.*
+!apps/dashboard/.env.example
 
 # Zero-knowledge artifacts
 *.zkey

@@ -192,6 +192,7 @@ jobs:
         run: |
           set -euo pipefail
           pnpm run --if-present build
+          pnpm --filter @pathnod/dashboard typecheck
           pnpm run --if-present test
 
       - name: Verify cross-language Poseidon vectors
