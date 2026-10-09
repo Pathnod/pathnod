@@ -31,7 +31,7 @@ targets:
         CODE_SIGN_STYLE: Automatic
         INFOPLIST_FILE: ../App/ChallengeScan/ChallengeScan-Info.plist
         CODE_SIGN_ENTITLEMENTS: ../App/ChallengeScan/ChallengeScan.entitlements
-        TARGETED_DEVICE_FAMILY: "1"
+        TARGETED_DEVICE_FAMILY: "1,2"
         SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited) PATHNOD_MOPRO"
         OTHER_SWIFT_FLAGS: "-Xcc -fmodule-map-file=$(SRCROOT)/MoproiOSBindings/module/module.modulemap"
       configs:

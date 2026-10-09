@@ -273,7 +273,7 @@ export class AppAttestVerifier {
     if (extensions.validationCategory !== undefined && !this.#policy.allowedValidationCategories.includes(extensions.validationCategory)) {
       throw new AppAttestVerificationError("invalid_environment", "validation_category");
     }
-    this.#checkBundleVersion(extensions.bundleVersion);
+    this.#checkBundleVersion(extensions.bundleVersion, parsed.extensions === undefined);
     return {
       keyID: input.keyID,
       publicKeyPem: publicKey.export({ type: "spki", format: "pem" }).toString(),
@@ -314,7 +314,11 @@ export class AppAttestVerifier {
     if (input.key.validationCategory !== undefined && extensions.validationCategory !== input.key.validationCategory) {
       throw new AppAttestVerificationError("invalid_environment", "validation_category_changed");
     }
-    this.#checkBundleVersion(extensions.bundleVersion);
+    if (input.key.bundleVersion !== undefined && extensions.bundleVersion === undefined) {
+      throw new AppAttestVerificationError("invalid_environment", "bundle_version");
+    }
+    this.#checkBundleVersion(extensions.bundleVersion,
+      parsed.extensions === undefined && input.key.validationCategory === undefined && input.key.bundleVersion === undefined);
     let signatureValid = false;
     try {
       signatureValid = verify(
@@ -327,10 +331,12 @@ export class AppAttestVerifier {
       fail("invalid_key");
     }
     if (!signatureValid) fail("invalid_assertion");
-    return { ...input.key, counter: parsed.counter, ...(extensions.bundleVersion === undefined ? {} : { bundleVersion: extensions.bundleVersion }) };
+    return { ...input.key, counter: parsed.counter, ...extensions };
   }
 
-  #checkBundleVersion(version: string | undefined): void {
+  #checkBundleVersion(version: string | undefined, legacy: boolean): void {
+    // Pre-iOS 27 authenticator data has no extensions; Apple still authenticates it.
+    if (version === undefined && legacy) return;
     if (version === undefined ? this.#policy.allowedBundleVersions.length > 0 : !this.#policy.allowedBundleVersions.includes(version)) {
       throw new AppAttestVerificationError("invalid_environment", "bundle_version");
     }

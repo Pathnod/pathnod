@@ -33,7 +33,12 @@ validation category `3` (development-signed app). Production callers must
 provide their own exact App ID, production environment, and permitted launch
 categories and bundle versions. The spike allows no bundle version extension,
 matching the device evidence captured here. A nonempty `allowedBundleVersions`
-list requires an assertion or attestation to carry one of those signed values.
+list requires an assertion or attestation using extensions to carry one of those
+signed values. The pre-iOS 27 format without extensions remains valid after all
+Apple certificate, identity, nonce, signature and counter checks. The missing
+category and bundle version remain unknown; they are not inferred from a client
+OS string. Once a key supplies those signed fields, they are stored alongside
+its counter and cannot disappear in later assertions.
 The list can include both the current and previous release while clients update;
 the key remains enrolled across that update. Development and production keys
 cannot cross those policies.

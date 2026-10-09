@@ -17,7 +17,6 @@ protocol ChallengeCentral: AnyObject {
 
 extension CBCentralManager: ChallengeCentral {}
 
-/// What the iPhone learned about the connected device, for the DEV-23 record.
 struct DeviceSummary: Equatable {
     let publicKeyHex: String
     let deviceIDHex: String
@@ -340,7 +339,7 @@ final class ChallengeBLEController: NSObject, ObservableObject,
         }
         stage = .finished
         isRunning = false
-        status = isObservation ? "Session collected and saved; three signatures verified." : "Three signatures verified on this iPhone."
+        status = isObservation ? "Session collected and saved; three signatures verified." : "Three signatures verified on this device."
         medianNotificationRTTMilliseconds = session?.medianNotificationRTTMilliseconds
         stopConnection()
         session = nil
