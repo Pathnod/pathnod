@@ -14,7 +14,9 @@ export function createDashboardServer(service: DashboardService) {
     res.setHeader('content-security-policy',"default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'");
     const json=(code:number,value:unknown)=>{res.statusCode=code;res.setHeader('content-type','application/json');res.end(JSON.stringify(value));};
     if(req.method!=='GET'){res.setHeader('allow','GET');json(405,{error:'read_only'});return;}
-    const url=new URL(req.url??'/','http://dashboard.invalid');
+    let url: URL;
+    try { url=new URL(req.url??'/','http://dashboard.invalid'); }
+    catch { json(400,{error:'invalid_input'});return; }
     const allowed:Record<string,string>={'/':'index.html','/app.js':'app.js','/state.js':'state.js','/style.css':'style.css','/details.css':'details.css','/mark.png':'mark.png'};
     if(allowed[url.pathname]&&!url.search){
       try{res.setHeader('content-type',url.pathname.endsWith('.png')?'image/png':url.pathname.endsWith('.css')?'text/css':url.pathname.endsWith('.js')?'text/javascript':'text/html');res.end(await readFile(new URL(allowed[url.pathname]!,assets)));}

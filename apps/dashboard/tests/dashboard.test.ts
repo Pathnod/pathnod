@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { readFileSync } from 'node:fs';
+import { connect } from 'node:net';
 import { PublicKey, type AccountInfo } from '@solana/web3.js';
 import { confidenceCommitment, decodeObservationTranscript, observationTranscriptHash } from '@pathnod/verifier';
 import { discriminator, registryAddresses, UPGRADEABLE_LOADER, appendObservationTree } from '@pathnod/solana';
@@ -18,6 +19,23 @@ const state={independentObservers:vector.scope.transcriptOrder.length,paidSlotsU
   observationRoot:Buffer.from(vector.scope.observationRoot,'hex'),confidenceCommitment:Buffer.from(vector.commitment,'hex'),frontier:undefined};
 const context={network:'devnet' as const,genesis:DEVNET_GENESIS,program:vector.scope.program,protocolID:vector.scope.protocolID,mode:'live',queryLimit:1000,readOnly:true};
 function checked(body:Record<string,any>){return validateConfidence(body,context,vector.scope.deviceID,vector.scope.epoch,vector.scope.policyVersion,state);}
+test('malformed raw HTTP target returns 400 and the same server remains available',async()=>{
+  const service={devices:async()=>({...context,total:0,devices:[]})} as unknown as DashboardService;
+  const server=createDashboardServer(service);
+  await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));
+  const address=server.address();assert.ok(address&&typeof address!=='string');
+  try{
+    const response=await new Promise<string>((resolve,reject)=>{
+      const client=connect(address.port,'127.0.0.1');let data='';
+      client.setTimeout(2000,()=>client.destroy(Error('Raw request timed out')));
+      client.on('connect',()=>client.write('GET http://[ HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n'));
+      client.on('data',chunk=>{data+=chunk.toString();});client.on('end',()=>resolve(data));client.on('error',reject);
+    });
+    assert.match(response,/HTTP\/1\.1 400/);assert.match(response,/\{"error":"invalid_input"\}/);assert.ok(!response.includes('ERR_INVALID_URL'));
+    const valid=await fetch(`http://127.0.0.1:${address.port}/api/devices`);assert.equal(valid.status,200);
+    assert.equal((await valid.json() as {total:number}).total,0);
+  }finally{await new Promise<void>((resolve,reject)=>server.close(error=>error?reject(error):resolve()));}
+});
 test('configuration rejects other networks, remote local validators and credentials',()=>{
   assert.equal(config.network,'devnet');
   for(const changes of [{PATHNOD_DASHBOARD_NETWORK:'mainnet'}, {PATHNOD_DASHBOARD_GENESIS:'wrong'},
