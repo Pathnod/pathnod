@@ -18,7 +18,7 @@
     "snarkjs": "0.7.6"
   },
   "devDependencies": {
-    "@types/node": "24.5.2",
+    "@types/node": "26.6.4",
     "tsx": "4.20.6",
     "typescript": "5.9.2"
   }
