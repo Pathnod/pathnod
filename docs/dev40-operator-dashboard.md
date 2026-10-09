@@ -83,10 +83,23 @@ queue. A paid slot is reward allocation, not a completed payout. Raw observer
 counts do not establish unique humans. `LOW`/`VERIFIED` are DEV-39 policy labels,
 not location or anti-relay certificates. Different protocol pseudonyms are not linked.
 
-The detail view polls every 15 seconds while visible and clears the previous result
-before each read. Selection changes abort previous browser requests and use a
-generation guard to ignore late responses. An invalidation becomes visible on the
-next refresh; the UI cannot claim instantaneous chain monitoring.
+The detail view schedules its next refresh 15 seconds after the previous poll
+finishes, while visible, without overlapping automatic requests. During refresh,
+the last successful result remains visible with an updating/last-checked indicator.
+An unchanged response preserves the detail DOM; errors clear the previous score.
+Selection changes abort previous browser requests and use a generation guard to
+ignore late responses. An invalidation becomes visible on the next refresh; the UI
+cannot claim instantaneous chain monitoring.
+
+The declared-location map shades the whole geohash6 cell on a local coordinate
+grid, not an exact device position. It loads no external tiles or imagery and marks
+the operator-provided area as not independently verified. Missing or invalid
+locations display an explicit explanation instead of a fabricated map. Geographic
+details expose the original geohash and bounding coordinates.
+
+The hardware confidence facet is labelled "Observer attestation": it concerns the
+observing phone's App Attest/StrongBox/TEE evidence and enrollment-risk adjustments,
+not the authenticity of the ESP32 or other observed equipment.
 
 The default view uses plain-language device, observation, reward and confidence
 labels. Expandable details retain epoch/policy identifiers, public keys, raw facet
@@ -104,8 +117,9 @@ pnpm --filter @pathnod/dashboard build
 
 Tests cover configuration mismatches, canonical report bindings, private-field
 projection, response limits, scoped registry reads, fail-closed concurrent changes,
-HTTP methods/query validation/headers, and frontend score clearing/late-response
-handling. Frontend tests use the actual browser module with a controlled DOM model;
+HTTP methods/query validation/headers, malformed-target recovery, geohash cell
+decoding, and frontend polling/score clearing/late-response handling. Frontend tests
+use the actual browser module with a controlled DOM model;
 they are not a physical hardware test or a substitute for real-browser layout QA.
 Root CI builds and tests the workspace, and explicitly typechecks the dashboard.
 
@@ -121,5 +135,7 @@ deployment, withdrawal, faucet or paid transaction is required for these checks.
 The implementation was checked in the browser on desktop and a narrow mobile
 viewport using finalized devnet accounts. The device, epoch, observer count and
 paid slot were displayed correctly, with confidence unavailable and no score.
-PR #85 supplies no reachable verifier URL: checking the actual published report
-remains pending that service, rather than substituting a fixture.
+The author still needs a reachable verifier URL for local published-report checks.
+Separately, kazai777 confirmed the real DEV-39 report integration in the PR review:
+LOW, 36.93%, with matching finalized commitment, on desktop Safari and a narrow
+viewport. No fixture is substituted when the configured service is unavailable.
