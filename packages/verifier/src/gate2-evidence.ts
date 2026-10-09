@@ -29,7 +29,7 @@ export interface Gate2Snapshot {
   payoutVault: string;
 }
 
-export async function gate2Snapshot(
+export async function observationAccountingSnapshot(
   connection: { getMultipleAccountsInfo(keys: PublicKey[], commitment: "finalized"): Promise<(AccountInfo<Buffer> | null)[]> },
   program: PublicKey,
   payload: ObservationRelayPayload,
@@ -102,18 +102,11 @@ export async function gate2Snapshot(
   )
     throw Error("Gate 2 payout binding mismatch");
   if (
-    epoch.independentObservers !== 1 ||
-    epoch.paidSlotsUsed !== 1 ||
+    epoch.independentObservers < 1 ||
+    epoch.paidSlotsUsed < 1 || epoch.paidSlotsUsed > epoch.independentObservers ||
     !record.slotPaid
   )
-    throw Error("Gate 2 requires one paid independent observation");
-  const expected = appendObservationTree(
-    Array.from({ length: 16 }, () => Buffer.alloc(32)),
-    0,
-    record.transcriptHash,
-  ).root;
-  if (!epoch.observationRoot.equals(expected))
-    throw Error("Gate 2 commitment tree mismatch");
+    throw Error("Replay requires an existing paid observation");
   const token = (
     row: AccountInfo<Buffer> | null | undefined,
     authority: PublicKey,
@@ -143,6 +136,20 @@ export async function gate2Snapshot(
     feeVault: token(rows[5], settings.treasury),
     payoutVault: token(rows[6], payments.payout),
   };
+}
+
+export async function gate2Snapshot(
+  connection: Parameters<typeof observationAccountingSnapshot>[0],
+  program: PublicKey,
+  payload: ObservationRelayPayload,
+): Promise<Gate2Snapshot> {
+  const snapshot = await observationAccountingSnapshot(connection, program, payload);
+  if (snapshot.independentObservers !== 1 || snapshot.paidSlotsUsed !== 1)
+    throw Error("Gate 2 requires one paid independent observation");
+  const expected = appendObservationTree(Array.from({ length: 16 }, () => Buffer.alloc(32)),
+    0, Buffer.from(payload.transcriptHash, "hex")).root;
+  if (snapshot.observationRoot !== expected.toString("hex")) throw Error("Gate 2 commitment tree mismatch");
+  return snapshot;
 }
 
 export function sameGate2Accounting(

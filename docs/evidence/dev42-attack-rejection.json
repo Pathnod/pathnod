@@ -1,0 +1,70 @@
+{
+  "version": 1,
+  "task": "DEV-42",
+  "validationKind": "physical-ipad-esp32-and-finalized-devnet",
+  "hardware": {
+    "observer": "iPad Air 13-inch M2",
+    "osVersion": "iPadOS 27.0.1",
+    "device": "ESP32-C3"
+  },
+  "date": "2026-10-09",
+  "network": "devnet",
+  "originalTranscriptHash": "d8cfafac003c38838440f0ce58de2b4156ba2769d31fa8deb3fce3ff120a9106",
+  "replay": {
+    "transaction": "3APmiSbbAHe5YxodqvfVVVtXncQumKCmU7CNfT5V3aLqea3xzaop1XycLGLFVFim84V7UCRm8SaJtSrCrxr33dp7",
+    "error": "E_NULLIFIER",
+    "programError": 6001,
+    "submitInstructionIndex": 2,
+    "finalized": true,
+    "unchanged": true,
+    "before": {
+      "commitment": "ANMC2sHZHeapYRqYtAs4JbN5Ck7gJBWx2GteAocxTqKC",
+      "independentObservers": 3,
+      "paidSlotsUsed": 3,
+      "observationRoot": "6c4d939abcd3678df132ae71d3922fbcdc81be7b9eac22700e1bd4cc634c77c9",
+      "slotPaid": true,
+      "gross": "50000",
+      "fees": "10000",
+      "available": "40000",
+      "withdrawn": "0",
+      "payoutNonce": "0",
+      "escrow": "0",
+      "feeVault": "30000",
+      "payoutVault": "40000"
+    },
+    "after": {
+      "commitment": "ANMC2sHZHeapYRqYtAs4JbN5Ck7gJBWx2GteAocxTqKC",
+      "independentObservers": 3,
+      "paidSlotsUsed": 3,
+      "observationRoot": "6c4d939abcd3678df132ae71d3922fbcdc81be7b9eac22700e1bd4cc634c77c9",
+      "slotPaid": true,
+      "gross": "50000",
+      "fees": "10000",
+      "available": "40000",
+      "withdrawn": "0",
+      "payoutNonce": "0",
+      "escrow": "0",
+      "feeVault": "30000",
+      "payoutVault": "40000"
+    },
+    "sameTransactionRecoveredAfterServerRestart": true
+  },
+  "latency": {
+    "kind": "reported-RTT-simulation-after-fresh-physical-BLE-capture",
+    "measuredMedianRTTMilliseconds": 59,
+    "addedDelayMilliseconds": 600,
+    "submittedMedianRTTMilliseconds": 659,
+    "httpStatus": 422,
+    "error": "E_RTT",
+    "operatorConfirmedOnPhysicalDevice": true,
+    "realRelayTest": false,
+    "serverBoundary": "device key/signatures/counters checked; rejected before assertion/ZK/nullifier validation"
+  },
+  "fullDEV41AccountingAuditAfterAttacks": {
+    "independentObservers": 3,
+    "paidSlotsUsed": 3,
+    "allThreeCommitmentsAndPayoutsUnchanged": true,
+    "confidenceCommitment": "0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "newVideoRecorded": false
+}

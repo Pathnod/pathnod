@@ -53,6 +53,9 @@ and epoch confidence publication. See [the confidence policy and runbook](docs/d
 DEV-41 validates three physical Apple observers (two iPhones and an iPad) on the
 same ESP32 and devnet epoch. See [the provisioning procedure and public evidence](docs/dev41-three-apple-observers.md).
 
+DEV-42 adds explicit development controls for a finalized proof replay and a
+simulated-latency rejection. See [the attack demonstration and hardware record](docs/dev42-attack-rejection-demo.md).
+
 ## Current status
 
 Pathnod is at an early development stage. The intended protocol above is not a
