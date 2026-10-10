@@ -1,0 +1,201 @@
+{
+  "version": 1,
+  "validatedOn": "2026-10-10",
+  "network": "Solana devnet",
+  "registration": {
+    "version": 1,
+    "network": "devnet",
+    "program": "HC6YfYPZSTVE37PF6qcdgAyRp2XSSyPovXGjpu9BiuVa",
+    "protocolID": "5e91ac7c3bdd67257010f53a623f7a105074221cabed358eb6a2b09e0f7ac6ab",
+    "deviceID": "2b52d036962219b5195412a33950044c747666eac5d9e88ddfa39dc613b049b8",
+    "deviceKey": "5838894a70843a937976156cb1183f8635840f1de06c011dbea12826efbf30ce",
+    "capabilities": 42,
+    "externalAsset": "G2ereCM7yq9SjzVfzcBpPGT8LEhnE4CgQiHY23f3u9Ms",
+    "tree": "8vhTubJuXqwt7jb54YLoaFMGn1kWPZJ54nnW7LM3uTG2",
+    "registry": "2gLbtXJoncx3ZekMEkZuwBdSu6X8LgLcsDi4Dmx7TrnZ",
+    "finalizedContextSlot": 509657169,
+    "registeredAt": "1791663003",
+    "linked": true,
+    "control": "Bubblegum v1 owner signature and current on-chain membership at registration",
+    "heliumAffiliation": false,
+    "transactions": {
+      "create-tree": {
+        "signature": "3SKruACd2pTfSqSRaZfW8C7pZoxoNTcbBCCAmEYXCoe9ipiYja6cSZjZjksV4nZoqU3Lkp4yVYoLCGn4vdXFP1eS",
+        "error": null
+      },
+      "mint-demo-cnft": {
+        "signature": "2gvnZCuindKgFguuGxF9dRFYauhfXs2Efw8jnZmEzZ4f5ao4JRMjVCRZfL6PWQ81k8bznyNs7GbDMt67v1jTfmsx",
+        "error": null
+      },
+      "init-unlinked-control": {
+        "signature": "5rUpQ4TkxjMb7vNj82MAztVxr8pzhuFsLp2CjU9uTNCZUM1QfodwNXDPG1JppSZCqVX58P2aUCKEtES45rH5svdW",
+        "error": null
+      },
+      "register-unlinked-control": {
+        "signature": "5rUgX51gU8nKX9zQQsHSSRUN3hqxPQUasqKUUWKjD1Yp9MrnHSP1aLAgoFP5iEsPhbWTTaybFSedvRmLxZuC3oaK",
+        "error": null
+      },
+      "init-linked-protocol": {
+        "signature": "4H7Xqo4PmtXZbpM8bnqv4UmaqMu2kua9Bh456qa5pKyce8uuUWwE6Ns6Linj7HpyHzzBdQ3Ctx5tMVWPU76zTxRV",
+        "error": null
+      },
+      "register-linked-device": {
+        "signature": "2B4Ca876uYrUFkq7EeqN6CifXCXeiWJ2UvxqsULBiFY6AVLdADm9wLs3gP5QB4cXQmQpyYHdAWMoCRcXWTDzA5qg",
+        "error": null
+      }
+    }
+  },
+  "deployment": {
+    "program": "HC6YfYPZSTVE37PF6qcdgAyRp2XSSyPovXGjpu9BiuVa",
+    "programdata": "59bJu7FG56umPCzKrK4cader4GsDvtizW8ipyKz7x638",
+    "lastDeploySlot": 509655608,
+    "binaryBytes": 548240,
+    "binarySHA256": "73e2b7abcaa76a503a0e90e074a5aad1766b55fbeb445546de6a5c2507484499",
+    "binaryMatchesFinalizedProgram": true,
+    "transactions": {
+      "upgrade": {
+        "signature": "NVgcu9qnJUmfu5mdbaDBD885cN7A3EyHFtVUzzA9wrN322m38sqxKBzhrwGS9cvmhznpugSeayeynQ9np6hE2gj",
+        "slot": 509655608,
+        "computeUnits": 2370,
+        "feeLamports": 5000
+      },
+      "register": {
+        "signature": "2B4Ca876uYrUFkq7EeqN6CifXCXeiWJ2UvxqsULBiFY6AVLdADm9wLs3gP5QB4cXQmQpyYHdAWMoCRcXWTDzA5qg",
+        "slot": 509656247,
+        "computeUnits": 45860,
+        "feeLamports": 10000
+      }
+    }
+  },
+  "physicalValidation": {
+    "operator": "kazai777",
+    "reportedByOperator": true,
+    "board": "ESP32-C3",
+    "sdk": "ESP-IDF v5.5.1",
+    "profile": "development storage + Helium emulation",
+    "applicationBytes": 589488,
+    "applicationSHA256": "76c66c00dcf389e71757a563cc2305be516ead589592c77507e218f7b23a8a52",
+    "flashScope": "application partition only; existing NVS preserved",
+    "observer": "iPad Air 13-inch M2, iPadOS 27.0.1",
+    "flow": "Pathnod S1: Start three challenges",
+    "verifiedResponses": 3,
+    "deviceCounters": [
+      897,
+      898,
+      899
+    ],
+    "notificationRTTMedianMilliseconds": 58.5,
+    "protocolHint": "df4bb040d8cf9e006693e7671c0d6904033b39d0a0382e4e1b2d3c9ad7440fda",
+    "protocolHintMatched": true
+  },
+  "historicalCompatibility": {
+    "beforeAndAfterAuditMatched": true,
+    "protocolID": "7e05517d5dc3c3893a9052e7587c52ef5838b7597a73c7b5ba309e53f5cef84e",
+    "epoch": 2962,
+    "independentObservers": 3,
+    "paidSlotsUsed": 3,
+    "observationRoot": "6c4d939abcd3678df132ae71d3922fbcdc81be7b9eac22700e1bd4cc634c77c9",
+    "confidenceCommitment": "0000000000000000000000000000000000000000000000000000000000000000",
+    "escrowBaseUnits": "0",
+    "feeVaultBaseUnits": "30000",
+    "payoutAvailableBaseUnits": [
+      "40000",
+      "40000",
+      "40000"
+    ],
+    "allObservationAndPayoutFieldsUnchanged": true
+  },
+  "unlinkedControl": {
+    "separateProtocol": true,
+    "sameDeviceKeyAndAsset": true,
+    "proofOfControl": null,
+    "linked": false,
+    "transaction": "5rUgX51gU8nKX9zQQsHSSRUN3hqxPQUasqKUUWKjD1Yp9MrnHSP1aLAgoFP5iEsPhbWTTaybFSedvRmLxZuC3oaK"
+  },
+  "localAdversarialValidation": {
+    "network": "local validator with actual cloned devnet Bubblegum and Compression programs",
+    "rejectedCases": {
+      "wrong-owner": {
+        "InstructionError": [
+          1,
+          {
+            "Custom": 6001
+          }
+        ]
+      },
+      "wrong-data": {
+        "InstructionError": [
+          1,
+          {
+            "Custom": 6001
+          }
+        ]
+      },
+      "swapped-metadata": {
+        "InstructionError": [
+          1,
+          {
+            "Custom": 6120
+          }
+        ]
+      },
+      "expired": {
+        "InstructionError": [
+          1,
+          {
+            "Custom": 6121
+          }
+        ]
+      },
+      "far-expiry": {
+        "InstructionError": [
+          1,
+          {
+            "Custom": 6121
+          }
+        ]
+      },
+      "missing-precompile": {
+        "InstructionError": [
+          0,
+          {
+            "Custom": 6120
+          }
+        ]
+      },
+      "forged-tree": {
+        "InstructionError": [
+          1,
+          {
+            "Custom": 6119
+          }
+        ]
+      },
+      "changed-owner": {
+        "InstructionError": [
+          1,
+          {
+            "Custom": 6001
+          }
+        ]
+      }
+    },
+    "membershipFailureProgram": "cmtDvXumGCrqC1Age74AVPhSRVXJMd8PJS91L8KbNCK",
+    "membershipFailureOriginVerified": true,
+    "actualOwnerTransferTested": true,
+    "failedRegistrationAccountsAbsent": true
+  },
+  "limits": [
+    "Demo cNFT has no Helium network affiliation.",
+    "linked is a control snapshot at registration, not continuing ownership.",
+    "Firmware hint is not signed in DEV_MSG_V0; firmware does not verify the chain.",
+    "CLI reconstructs proofs for its depth-3 demonstration tree, not arbitrary indexed assets.",
+    "Physical BLE result was reported by the operator; raw captures and signed journals are private."
+  ],
+  "publishedIDL": {
+    "canonicalMetadataAccount": "ASDk1UwertpJzvcbaN1qesYdoyKLjs3wE7aMHGeUvGb7",
+    "fetchedAtFinalized": true,
+    "matchesBuiltIDL": true,
+    "sha256": "1e3fbb7be1b89aea2131fd910dc8007afe78e16ec835b767529ddcca4d0300cb"
+  }
+}

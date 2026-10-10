@@ -1,6 +1,8 @@
 import { createHash } from "node:crypto";
 export * from './payments.ts';
 import { PublicKey, SystemProgram, TransactionInstruction } from "@solana/web3.js";
+import { encodeControlProof, controlProofAccounts, cnftAssetId, type CnftControlProof } from './asset-control.ts';
+export * from './asset-control.ts';
 
 export const TOKEN_PROGRAM = new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
 export const UPGRADEABLE_LOADER = new PublicKey("BPFLoaderUpgradeab1e11111111111111111111111");
@@ -100,17 +102,57 @@ export interface DeviceArgs {
   capabilities: number;
   externalAsset: PublicKey | null;
   claimedGeohash: string | null;
+  proofOfControl?: CnftControlProof;
 }
 
-export function registerDevice(program: PublicKey, authority: PublicKey, protocol: Uint8Array, args: DeviceArgs) {
+export function registerDevice(
+  program: PublicKey,
+  authority: PublicKey,
+  protocol: Uint8Array,
+  args: DeviceArgs,
+) {
   const addresses = registryAddresses(program, protocol);
-  if (args.claimedGeohash !== null && !/^[0123456789bcdefghjkmnpqrstuvwxyz]{6}$/.test(args.claimedGeohash)) {
+  if (
+    args.claimedGeohash !== null &&
+    !/^[0123456789bcdefghjkmnpqrstuvwxyz]{6}$/.test(args.claimedGeohash)
+  ) {
     throw new Error("Invalid declared geohash6");
   }
-  return instruction(program, "register_device", Buffer.concat([
-    bytes32(args.deviceId), bytes32(args.key), u8(args.curve), option(args.externalAsset?.toBuffer() ?? null),
-    Buffer.from([0]), u32(args.capabilities), option(args.claimedGeohash === null ? null : Buffer.from(args.claimedGeohash, "ascii")),
-  ]), [meta(addresses.config), meta(addresses.device(args.deviceId), true), meta(authority, true, true), meta(SystemProgram.programId)]);
+  if (
+    args.proofOfControl &&
+    !args.externalAsset?.equals(
+      cnftAssetId(args.proofOfControl.tree, args.proofOfControl.nonce),
+    )
+  )
+    throw Error("Asset proof does not match registration");
+  const proof = args.proofOfControl
+    ? encodeControlProof(args.proofOfControl)
+    : null;
+  const encodedProof = proof ? Buffer.concat([u32(proof.length), proof]) : null;
+  return instruction(
+    program,
+    "register_device",
+    Buffer.concat([
+      bytes32(args.deviceId),
+      bytes32(args.key),
+      u8(args.curve),
+      option(args.externalAsset?.toBuffer() ?? null),
+      option(encodedProof),
+      u32(args.capabilities),
+      option(
+        args.claimedGeohash === null
+          ? null
+          : Buffer.from(args.claimedGeohash, "ascii"),
+      ),
+    ]),
+    [
+      meta(addresses.config),
+      meta(addresses.device(args.deviceId), true),
+      meta(authority, true, true),
+      meta(SystemProgram.programId),
+      ...(args.proofOfControl ? controlProofAccounts(args.proofOfControl) : []),
+    ],
+  );
 }
 
 export function publishRoot(program: PublicKey, authority: PublicKey, root: Uint8Array, leafCount: number) {

@@ -1,4 +1,4 @@
-.PHONY: demo demo-prepare demo-check demo-import-enrollment gate2-check gate2-status gate2-replay gate2-report confidence-import confidence-compute confidence-publish confidence-status confidence-report
+.PHONY: demo demo-prepare demo-check demo-import-enrollment gate2-check gate2-status gate2-replay gate2-report confidence-import confidence-compute confidence-publish confidence-status confidence-report linked-asset-prepare linked-asset-mint linked-asset-register linked-asset-report
 
 # Configuration, keys and generated artifacts must be outside the checkout.
 demo:
@@ -25,3 +25,7 @@ gate2-check gate2-status gate2-replay gate2-report:
 confidence-import confidence-compute confidence-publish confidence-status confidence-report:
 	@test -n "$(CONFIDENCE_CONFIG)" || (echo 'Set CONFIDENCE_CONFIG=/absolute/private/confidence.json'; exit 1)
 	pnpm --filter @pathnod/verifier confidence -- --config "$(CONFIDENCE_CONFIG)" $(patsubst confidence-%,%,$@)
+
+linked-asset-prepare linked-asset-mint linked-asset-register linked-asset-report:
+	@test -n "$(LINKED_ASSET_CONFIG)" || (echo 'Set LINKED_ASSET_CONFIG=/absolute/private/linked-asset.json'; exit 1)
+	pnpm --filter @pathnod/solana assets:demo -- --config "$(LINKED_ASSET_CONFIG)" $(patsubst linked-asset-%,%,$@)

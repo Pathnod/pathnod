@@ -56,6 +56,9 @@ same ESP32 and devnet epoch. See [the provisioning procedure and public evidence
 DEV-42 adds explicit development controls for a finalized proof replay and a
 simulated-latency rejection. See [the attack demonstration and hardware record](docs/dev42-attack-rejection-demo.md).
 
+DEV-43 verifies compressed NFT owner authorization and on-chain membership for
+linked registration. See [the asset control adapter and demonstration](docs/dev43-linked-cnft.md).
+
 ## Current status
 
 Pathnod is at an early development stage. The intended protocol above is not a

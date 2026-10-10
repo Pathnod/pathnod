@@ -1,0 +1,15 @@
+{
+  "name": "Pathnod DEV43 Helium demo",
+  "symbol": "PNDEMO",
+  "description": "A Solana devnet compressed NFT used to demonstrate Pathnod device-to-asset control verification. This is a demo asset, not a Helium hotspot or proof of Helium network affiliation, radio coverage or location.",
+  "attributes": [
+    { "trait_type": "Purpose", "value": "Pathnod DEV-43 control proof demonstration" },
+    { "trait_type": "Network", "value": "Solana devnet" },
+    { "trait_type": "Demo asset", "value": "true" }
+  ],
+  "properties": {
+    "demo": true,
+    "helium_network_affiliation": false,
+    "standard": "Bubblegum v1 compressed NFT"
+  }
+}

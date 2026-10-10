@@ -330,13 +330,35 @@ only: `INFO.protocol_hint` carries a cNFT asset ID supplied at build time.
 a **placeholder**, not a real asset: the base58 encoding of SHA-256 of the ASCII
 string `Pathnod/helium-emulation/demo-asset/v0`, i.e. `9Hx3f9WPF5DdxqYzf51i2zieCRLTrYr5iP2b4mLmnPkd`
 (hex `7b350763c0f402f77dc94d0a64a6f9c6911475cf92206035a54d7b26395dec22`).
-Replace it with the devnet cNFT once DEV-43 provides one.
+For the actual DEV-43 cNFT, use a separate generated overlay; the checked-in
+placeholder remains useful for firmware-only builds. See the
+[DEV-43 control proof and physical record](../../docs/dev43-linked-cnft.md).
 
 ```sh
 idf.py -B build-c3-helium -D SDKCONFIG=sdkconfig.c3.helium.local \
   -D 'SDKCONFIG_DEFAULTS=sdkconfig.defaults;sdkconfig.helium' set-target esp32c3
 idf.py -B build-c3-helium -D SDKCONFIG=sdkconfig.c3.helium.local build
 ```
+
+To announce the DEV-43 demo asset, create `sdkconfig.asset.local`:
+
+```text
+CONFIG_PATHNOD_HELIUM_EMULATION=y
+CONFIG_PATHNOD_HELIUM_ASSET_ID="G2ereCM7yq9SjzVfzcBpPGT8LEhnE4CgQiHY23f3u9Ms"
+```
+
+Then use that overlay in a separate build and flash only the application to
+preserve an existing registered identity and counter:
+
+```sh
+idf.py -B build-c3-asset -D SDKCONFIG=sdkconfig.c3.asset.local \
+  -D 'SDKCONFIG_DEFAULTS=sdkconfig.defaults;sdkconfig.asset.local' set-target esp32c3
+idf.py -B build-c3-asset -D SDKCONFIG=sdkconfig.c3.asset.local build
+idf.py -B build-c3-asset -D SDKCONFIG=sdkconfig.c3.asset.local -p /dev/cu.YOUR_BOARD app-flash
+```
+
+The firmware does not consult Solana; its boot message about unproven asset
+control describes that local boundary. Check the linked registry separately.
 
 Check it from the iPhone with the DEV-23 ChallengeScan app (or nRF Connect):
 INFO must show capabilities `00 00 00 2a` and the configured asset ID in hex as
