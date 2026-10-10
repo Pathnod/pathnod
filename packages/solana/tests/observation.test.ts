@@ -96,7 +96,7 @@ test("DEV-36: payment instruction fits a signed v0 packet using lookup addresses
   transaction.sign(payer);
   assert.throws(()=>transaction.serialize(),/too large/);
   const lookup = new AddressLookupTableAccount({ key:Keypair.generate().publicKey,state:{
-    deactivationSlot:0xffff_ffff_ffff_ffffn,lastExtendedSlot:1,lastExtendedSlotStartIndex:0,authority:undefined,
+    deactivationSlot:0xffff_ffff_ffff_ffffn,lastExtendedSlot:1,lastExtendedSlotStartIndex:0,
     addresses:instruction.keys.filter(k=>!k.isSigner).map(k=>k.pubkey) } });
   const versioned = new VersionedTransaction(new TransactionMessage({ payerKey:payer.publicKey,
     recentBlockhash:PublicKey.default.toBase58(), instructions:transaction.instructions }).compileToV0Message([lookup]));

@@ -9,6 +9,7 @@ use groth16_solana::groth16::{Groth16Verifier, Groth16Verifyingkey};
 
 mod registry;
 pub use registry::*;
+mod asset_control;
 mod authorization;
 pub use authorization::observation_authorization_digest;
 mod observation;
@@ -226,7 +227,7 @@ pub enum PathnodError {
     InvalidDevice,
     #[msg("Only Ed25519 devices are supported in this registry version")]
     UnsupportedCurve,
-    #[msg("External asset control proofs are not supported in this registry version")]
+    #[msg("Unsupported external asset proof format")]
     UnsupportedControlProof,
     #[msg("Declared geohash must contain six lowercase geohash characters")]
     InvalidGeohash,
@@ -252,6 +253,12 @@ pub enum PathnodError {
     PaymentOverflow,
     #[msg("Confidence calculation no longer matches the epoch state")]
     StaleConfidence,
+    #[msg("Invalid compressed NFT identity, provenance or current ownership proof")]
+    InvalidExternalAssetProof,
+    #[msg("Missing or mismatched owner authorization for asset control")]
+    InvalidAssetControlAuthorization,
+    #[msg("Asset control authorization has expired or exceeds its validity window")]
+    ExpiredAssetControlProof,
 }
 
 fn verify_proof(

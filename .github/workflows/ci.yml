@@ -281,6 +281,11 @@ jobs:
           task_publisher="$RUNNER_TEMP/dev28-publisher.json"
           solana-keygen new --silent --no-bip39-passphrase --outfile "$task_publisher"
           solana-test-validator --ledger "$RUNNER_TEMP/dev27-ledger" \
+            --url https://api.devnet.solana.com \
+            --clone-upgradeable-program BGUMAp9Gq7iTEuizy4pqaxsTyUCBK68MDfK752saRPUY \
+            --clone-upgradeable-program cmtDvXumGCrqC1Age74AVPhSRVXJMd8PJS91L8KbNCK \
+            --clone-upgradeable-program noopb9bkMVfRPU8AsbpTUg8AQkHtKwMYZiFUjNRtMmV \
+            --clone 4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU \
             --rpc-port 18899 --faucet-port 18902 --dynamic-port-range 19000-19040 \
             --bind-address 127.0.0.1 --quiet > "$RUNNER_TEMP/dev27-validator.log" 2>&1 &
           task_validator_pid=$!
@@ -306,6 +311,21 @@ jobs:
             --rpc http://127.0.0.1:18899 --program "$task_program" --wallet "$task_wallet" \
             --publisher-wallet "$task_publisher" --database "$RUNNER_TEMP/dev35-policy.sqlite" \
             --report "$RUNNER_TEMP/dev35-submission-report.json" --payments yes
+          task_asset_config="$RUNNER_TEMP/dev43-linked-config.json"
+          node --input-type=module - "$task_asset_config" "$task_wallet" "$task_program" "$RUNNER_TEMP/dev43-assets" <<'JS'
+          import {writeFileSync} from 'node:fs';
+          const [config,wallet,program,stateDirectory]=process.argv.slice(2);
+          const response=await fetch('http://127.0.0.1:18899',{method:'POST',headers:{'content-type':'application/json'},
+            body:JSON.stringify({jsonrpc:'2.0',id:1,method:'getGenesisHash'})});
+          const genesis=(await response.json()).result;
+          if(typeof genesis!=='string')throw Error('Missing local genesis');
+          writeFileSync(config,JSON.stringify({version:1,rpc:'http://127.0.0.1:18899',localValidator:true,expectedGenesis:genesis,
+            wallet,program,stateDirectory,deviceInfo:'00015838894a70843a937976156cb1183f8635840f1de06c011dbea12826efbf30ce0000002a'+'00'.repeat(32)}),{mode:0o600});
+          JS
+          pnpm --filter @pathnod/solana assets:demo -- --config "$task_asset_config" mint
+          pnpm --filter @pathnod/solana assets:demo -- --config "$task_asset_config" register
+          pnpm --filter @pathnod/solana assets:demo -- --config "$task_asset_config" negative-tests
+          pnpm --filter @pathnod/solana assets:demo -- --config "$task_asset_config" report
 
       - name: Ensure the checkout remains unchanged
         run: git diff --exit-code

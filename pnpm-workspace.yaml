@@ -13,6 +13,8 @@ allowBuilds:
   esbuild: true
   utf-8-validate: false
 overrides:
+  # Patch GHSA-378v-28hj-76wf in Bubblegum's legacy bn.js helpers, retaining v4.
+  'bn.js@>=4 <5': 4.12.5
   # jayson 5 removes stream-json and uuid; keep the override scoped to web3.
   '@solana/web3.js>jayson': 5.0.0
   underscore: 1.13.8

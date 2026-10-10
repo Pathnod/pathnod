@@ -56,10 +56,13 @@ impl RegisterDeviceArgs {
             self.device_id == derive_device_id(&self.k_dev),
             PathnodError::InvalidDevice
         );
-        require!(
-            self.proof_of_control.is_none(),
-            PathnodError::UnsupportedControlProof
-        );
+        if let Some(proof) = &self.proof_of_control {
+            crate::asset_control::CnftControlProof::decode(proof)?;
+            require!(
+                self.external_asset.is_some(),
+                PathnodError::InvalidExternalAssetProof
+            );
+        }
         if let Some(asset) = self.external_asset {
             require_keys_neq!(asset, Pubkey::default(), PathnodError::InvalidDevice);
         }
@@ -223,12 +226,27 @@ pub fn handle_register_device(
     args: RegisterDeviceArgs,
 ) -> Result<()> {
     args.validate()?;
+    let linked = args.proof_of_control.is_some();
+    if linked {
+        crate::asset_control::verify_control(
+            &ctx.accounts.authority.key(),
+            &ctx.accounts.config.protocol_id,
+            &args,
+            ctx.remaining_accounts,
+            Clock::get()?.unix_timestamp,
+        )?;
+    } else {
+        require!(
+            ctx.remaining_accounts.is_empty(),
+            PathnodError::InvalidExternalAssetProof
+        );
+    }
     ctx.accounts.device.set_inner(DeviceRegistry {
         device_id: args.device_id,
         k_dev: args.k_dev,
         curve: args.curve,
         external_asset: args.external_asset,
-        linked: false,
+        linked,
         registered_at: Clock::get()?.unix_timestamp,
         capabilities: args.capabilities,
         claimed_geohash6: args.claimed_geohash6,
